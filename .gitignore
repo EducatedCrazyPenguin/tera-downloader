@@ -1,0 +1,13 @@
+# Local research contains share metadata and temporary signed URLs.
+research/
+downloads/
+__pycache__/
+*.part
+.tera-settings.json
+.env
+.env.*
+cookies*
+*.sqlite
+*.sqlite-*
+*.log
+*.png
