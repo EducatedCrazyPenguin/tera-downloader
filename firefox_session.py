@@ -17,7 +17,8 @@ from pathlib import Path
 TERABOX_DOMAINS = (
     'terabox.com', 'terabox.app', 'teraboxapp.com', '1024terabox.com',
     '1024tera.com', 'freeterabox.com', 'terasharelink.com', 'teraboxlink.com',
-    'teraboxshare.com', 'nephobox.com', '4funbox.com', 'mirrobox.com',
+    'terasharefile.com', 'terafileshare.com', 'teraboxshare.com',
+    'nephobox.com', '4funbox.com', 'mirrobox.com',
 )
 
 

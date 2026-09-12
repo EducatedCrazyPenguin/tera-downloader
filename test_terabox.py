@@ -34,6 +34,25 @@ class Tests(unittest.TestCase):
         self.assertEqual(share_id('https://1024terabox.com/s/1abcdef'), 'abcdef')
         self.assertEqual(share_id('https://terabox.com/sharing/link?surl=1abcdef'), '1abcdef')
 
+    def test_terashare_alias_formats(self):
+        aliases = ('terasharelink.com', 'terasharefile.com', 'terafileshare.com')
+        for domain in aliases:
+            with self.subTest(domain=domain, format='path'):
+                self.assertEqual(share_id(f'https://{domain}/s/1abc_DEF-123?pwd=7x9q'), 'abc_DEF-123')
+            with self.subTest(domain=domain, format='query'):
+                self.assertEqual(share_id(f'https://www.{domain}/sharing/link?surl=abc_DEF-123&pwd=7x9q'), 'abc_DEF-123')
+
+    def test_terashare_alias_security_boundaries(self):
+        invalid = (
+            'http://terasharelink.com/s/1abcdef',
+            'https://terasharelink.com.evil.example/s/1abcdef',
+            'https://user@terasharefile.com/s/1abcdef',
+            'https://terafileshare.com:8443/s/1abcdef',
+        )
+        for url in invalid:
+            with self.subTest(url=url), self.assertRaises(DownloadError):
+                share_id(url)
+
     def test_network_allowlist(self):
         for url in ('https://terabox.com.evil.example/a', 'http://terabox.com/a', 'https://user@terabox.com/a', 'https://127.0.0.1/a', 'https://terabox.com:8443/a'):
             with self.assertRaises(DownloadError):

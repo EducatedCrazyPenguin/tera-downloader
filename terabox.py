@@ -20,7 +20,8 @@ from firefox_session import SessionError, load_session, profiles
 SHARE_DOMAINS = (
     'terabox.com', 'terabox.app', 'teraboxapp.com', '1024terabox.com',
     '1024tera.com', 'freeterabox.com', 'terasharelink.com', 'teraboxlink.com',
-    'teraboxshare.com', 'nephobox.com', '4funbox.com', 'mirrobox.com',
+    'terasharefile.com', 'terafileshare.com', 'teraboxshare.com',
+    'nephobox.com', '4funbox.com', 'mirrobox.com',
 )
 MEDIA_DOMAINS = SHARE_DOMAINS + ('teraboxcdn.com',)
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.flv'}

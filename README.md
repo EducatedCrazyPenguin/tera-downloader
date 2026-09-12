@@ -9,6 +9,10 @@
 4. Paste your link and click **Download**. A single video downloads automatically.
    For a folder, select a video from the list and click **Download** again.
 
+TeraBox aliases from `terasharelink.com`, `terasharefile.com`, and
+`terafileshare.com` are accepted in both `/s/1…` and `sharing/link?surl=…`
+formats. They use the same selected Firefox login and direct TeraBox download flow.
+
 You do not log in for every movie. Tera rereads Firefox's TeraBox cookies and
 refreshes its page tokens before every download. If the session expires, sign
 into TeraBox in Firefox again. If a new login is not detected, close Firefox

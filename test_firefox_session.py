@@ -25,6 +25,7 @@ class FirefoxTests(unittest.TestCase):
             rows = [
                 ('.1024tera.com', '/', 1, future, 'ndus', 'test-session-only', 1, 3, ''),
                 ('www.1024tera.com', '/sharing', 1, future, 'host_only', 'a', 0, 2, ''),
+                ('.terasharefile.com', '/', 1, future, 'alias_cookie', 'alias-only', 1, 1, ''),
                 ('.example.com', '/', 1, future, 'password', 'unrelated', 1, 4, ''),
                 ('.terabox.com.evil.example', '/', 1, future, 'ndus', 'wrong-host', 1, 5, ''),
                 ('.terabox.com', '/', 1, future, 'ndus', 'container-account', 1, 8, '^userContextId=1'),
@@ -35,7 +36,7 @@ class FirefoxTests(unittest.TestCase):
             database.close()
             session = load_session(FirefoxProfile('test', Path(directory)))
             cookies = list(session.cookies)
-            self.assertEqual({cookie.name for cookie in cookies}, {'ndus', 'host_only'})
+            self.assertEqual({cookie.name for cookie in cookies}, {'ndus', 'host_only', 'alias_cookie'})
             self.assertEqual(session.origin, 'https://www.1024tera.com')
             host_cookie = next(cookie for cookie in cookies if cookie.name == 'host_only')
             self.assertFalse(host_cookie.domain_specified)
