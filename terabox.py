@@ -35,6 +35,23 @@ class Cancelled(DownloadError):
     pass
 
 
+PAUSED_STATUS = 'Paused. Click Resume to continue.'
+
+
+def _wait_for_download(cancel, pause=None, status=lambda text: None):
+    if cancel.is_set():
+        raise Cancelled('Cancelled. Completed downloads were kept.')
+    if pause is not None and pause.is_set():
+        while pause.is_set():
+            # A quick Resume/Pause can happen entirely between worker checks.
+            status(PAUSED_STATUS)
+            if cancel.wait(.1):
+                raise Cancelled('Cancelled. Completed downloads were kept.')
+        if cancel.is_set():
+            raise Cancelled('Cancelled. Completed downloads were kept.')
+        status('Resuming…')
+
+
 def validate_url(url: str, domains=MEDIA_DOMAINS) -> str:
     parsed = urllib.parse.urlsplit(url)
     host = (parsed.hostname or '').lower()
@@ -84,8 +101,9 @@ class Video:
 
 
 class TeraBox:
-    def __init__(self, cancel=None, status=lambda text: None, firefox_profile=None):
+    def __init__(self, cancel=None, status=lambda text: None, firefox_profile=None, pause=None):
         self.cancel = cancel or threading.Event()
+        self.pause = pause
         self.status = status
         self.cookies = http.cookiejar.CookieJar()
         self.firefox_profile = firefox_profile
@@ -135,6 +153,8 @@ class TeraBox:
         self.bootstrap(self.session_origin + '/main')
         try:
             quota = self.api('/api/quota', {'checkfree': 1, 'checkexpire': 1, 'bdstoken': self.bdstoken})
+        except Cancelled:
+            raise
         except DownloadError:
             raise DownloadError('TeraBox did not accept the saved Firefox session. Open TeraBox in that profile, sign in again if asked, then close Firefox and retry.') from None
         if 'total' not in quota or 'used' not in quota:
@@ -143,8 +163,7 @@ class TeraBox:
         return True
 
     def check_cancel(self):
-        if self.cancel.is_set():
-            raise Cancelled('Cancelled. No completed file was created.')
+        _wait_for_download(self.cancel, self.pause, self.status)
 
     def open(self, url, data=None, headers=None):
         self.check_cancel()
@@ -159,7 +178,7 @@ class TeraBox:
         except urllib.error.HTTPError as error:
             raise DownloadError(f'TeraBox returned HTTP {error.code}. No external fallback was used.') from None
         except (urllib.error.URLError, TimeoutError, OSError):
-            raise DownloadError('Could not connect to TeraBox. Check your connection or VPN, then retry.') from None
+            raise DownloadError('Could not connect to TeraBox directly. If Firefox also cannot open the share, your network is blocking or interrupting TeraBox; this app does not route around that restriction.') from None
 
     def api(self, endpoint, params=None, body=None):
         query = {'app_id': 250528, 'web': 1, 'channel': 'dubox', 'clienttype': 0,
@@ -239,6 +258,8 @@ class TeraBox:
                 'type': 'dlink', 'need_speed': 0, 'scene': '', 'bdstoken': self.bdstoken}, {
                 'product': 'share', 'uk': meta.get('uk_str') or meta['uk'],
                 'fid_list': json.dumps([int(video.fid)]), 'primaryid': meta['shareid']})
+        except Cancelled:
+            raise
         except DownloadError as error:
             mode = 'with your Firefox session' if self.firefox_profile else 'without login'
             raise DownloadError(f'The video is visible, but TeraBox did not provide a full-download link {mode}.\n\n' + str(error) + '\n\nNo preview or partial movie was saved.') from None
@@ -252,6 +273,7 @@ class TeraBox:
         return validate_url(direct)
 
     def download(self, video, folder, progress=lambda received, total: None):
+        self.check_cancel()
         if video.size <= 0:
             raise DownloadError('TeraBox did not report a file size, so completeness cannot be verified.')
         url = self.download_url(video)
@@ -299,6 +321,65 @@ class TeraBox:
         except Exception:
             temporary.unlink(missing_ok=True)
             raise
+
+
+def parse_links(text):
+    links = []
+    for number, line in enumerate(text.splitlines(), 1):
+        for value in line.split(','):
+            value = value.strip()
+            if not value:
+                continue
+            try:
+                share_id(value)
+            except DownloadError as error:
+                raise DownloadError(f'Invalid link on line {number}: {error}') from None
+            links.append(value)
+    if not links:
+        raise DownloadError('Paste at least one TeraBox share link.')
+    return links
+
+
+def download_queue(links, folder, firefox_profile, cancel, event=lambda *args: None, client_factory=None, pause=None):
+    """Download every video in each link, reporting progress through ``event``."""
+    client_factory = client_factory or TeraBox
+    completed, failures = [], []
+    status = lambda text: event('status', text)
+    for link_index, link in enumerate(links):
+        status = lambda text: event('status', (link_index, text))
+        _wait_for_download(cancel, pause, status)
+        event('queue', (link_index, 'Opening share…'))
+        try:
+            client = client_factory(cancel, status, firefox_profile, **({'pause': pause} if pause is not None else {}))
+            videos = client.find_videos(link)
+        except Cancelled:
+            raise
+        except DownloadError as error:
+            failures.append(f'Link {link_index + 1}: {error}')
+            event('queue', (link_index, 'Failed'))
+            continue
+        link_failed = False
+        for video_index, video in enumerate(videos):
+            _wait_for_download(cancel, pause, status)
+            event('queue', (link_index, f'Downloading {video_index + 1}/{len(videos)}: {video.name}'))
+            last = [0.0]
+            def update(received, total):
+                now = time.monotonic()
+                if now - last[0] > .15 or received == total:
+                    event('progress', (link_index, received, total))
+                    last[0] = now
+            try:
+                path = client.download(video, folder, update)
+            except Cancelled:
+                raise
+            except DownloadError as error:
+                failures.append(f'Link {link_index + 1}, {video.name}: {error}')
+                link_failed = True
+            else:
+                completed.append(str(path))
+        event('queue', (link_index, 'Completed with errors' if link_failed else 'Completed'))
+    _wait_for_download(cancel, pause, status)
+    return completed, failures
 
 
 def human_size(size):
@@ -355,10 +436,10 @@ def gui():
     frame.pack(fill='both', expand=True)
     ttk.Label(frame, text='Tera', style='Title.TLabel').pack(anchor='w')
     ttk.Label(frame, text='Download public TeraBox videos directly to your computer.').pack(anchor='w', pady=(4, 18))
-    link = tk.StringVar()
-    entry = ttk.Entry(frame, textvariable=link, font=('Segoe UI', 11))
-    entry.pack(fill='x', ipady=7)
-    entry.focus()
+    ttk.Label(frame, text='Paste links one per line or separated by commas. Every video downloads in order.').pack(anchor='w')
+    links_box = tk.Text(frame, height=4, font=('Segoe UI', 11), wrap='word')
+    links_box.pack(fill='x', pady=(4, 0))
+    links_box.focus()
     settings = load_settings()
     try:
         available_profiles = profiles()
@@ -381,7 +462,8 @@ def gui():
     source_box.pack(side='left', fill='x', expand=True)
     def launch_firefox():
         try:
-            open_firefox(profile_options.get(source.get()), link.get().strip())
+            first_link = next((value.strip() for value in links_box.get('1.0', 'end').splitlines() if value.strip()), '')
+            open_firefox(profile_options.get(source.get()), first_link)
         except DownloadError as error:
             messagebox.showerror('Open Firefox', str(error), parent=root)
     firefox_button = ttk.Button(session_row, text='Login in Firefox', command=launch_firefox)
@@ -390,7 +472,8 @@ def gui():
     destination = tk.StringVar(value=str(Path(__file__).parent / 'downloads'))
     folder_row = ttk.Frame(frame)
     folder_row.pack(fill='x', pady=10)
-    ttk.Entry(folder_row, textvariable=destination).pack(side='left', fill='x', expand=True)
+    destination_entry = ttk.Entry(folder_row, textvariable=destination)
+    destination_entry.pack(side='left', fill='x', expand=True)
     def browse():
         selected = filedialog.askdirectory(parent=root, title='Save videos to')
         if selected:
@@ -399,7 +482,7 @@ def gui():
     browse_button.pack(side='right', padx=(8, 0))
     files = tk.Listbox(frame, height=5, font=('Segoe UI', 10), activestyle='none', exportselection=False)
     files.pack(fill='both', expand=True)
-    status = tk.StringVar(value='Paste a share link. Folder links will show a video selection.')
+    status = tk.StringVar(value='Paste one or more share links, then click Download queue.')
     ttk.Label(frame, textvariable=status, wraplength=750).pack(anchor='w', pady=(12, 7))
     progress = ttk.Progressbar(frame, maximum=100)
     progress.pack(fill='x')
@@ -409,11 +492,10 @@ def gui():
     ttk.Label(frame, text='Use a normal Firefox tab. In-app browser login cannot be imported here.', foreground='#6b7280').pack(anchor='w', pady=(4, 0))
     events = queue.Queue()
     stop = threading.Event()
-    state = {'busy': False, 'client': None, 'videos': [], 'link': '', 'closing': False}
+    pause = threading.Event()
+    state = {'busy': False, 'downloading': False, 'queue': [], 'closing': False}
 
     def source_changed(event=None):
-        state.update(client=None, videos=[], link='')
-        files.delete(0, 'end')
         try:
             save_settings(profile_options.get(source.get()))
         except OSError:
@@ -424,8 +506,12 @@ def gui():
 
     def busy(value):
         state['busy'] = value
+        pause.clear()
+        if not value:
+            state['downloading'] = False
+        pause_button.configure(text='Pause', state='normal' if state['downloading'] else 'disabled')
         normal = 'disabled' if value else 'normal'
-        for widget in (button, browse_button, check_button, forget_button, firefox_button, entry):
+        for widget in (button, browse_button, check_button, forget_button, firefox_button, links_box, destination_entry):
             widget.configure(state=normal)
         source_box.configure(state='disabled' if value else 'readonly')
         cancel_button.configure(state='normal' if value else 'disabled')
@@ -444,7 +530,7 @@ def gui():
                 client = TeraBox(stop, emit_status, profile)
                 client.verify_login()
                 save_settings(profile)
-                events.put(('login', 'Firefox login verified. Paste a link and click Download.'))
+                events.put(('login', 'Firefox login verified. Paste links and click Download queue.'))
             except (DownloadError, OSError) as error:
                 events.put(('login', str(error) if isinstance(error, DownloadError) else 'Could not save your profile preference.'))
             finally:
@@ -459,62 +545,66 @@ def gui():
     def emit_status(value):
         events.put(('status', value))
 
-    def transfer(client, video, folder):
-        last = [0.0]
-        def update(received, total):
-            now = time.monotonic()
-            if now - last[0] > .15 or received == total:
-                events.put(('progress', (received, total)))
-                last[0] = now
-        path = client.download(video, folder, update)
-        events.put(('done', str(path)))
+    def render_queue():
+        files.delete(0, 'end')
+        for index, (link, item_status) in enumerate(state['queue'], 1):
+            files.insert('end', f'{index}. {item_status}  ·  {link}')
 
-    def start():
+    def start_queue():
         if state['busy']:
             return
-        url, folder = link.get().strip(), destination.get().strip()
+        try:
+            links = parse_links(links_box.get('1.0', 'end'))
+        except DownloadError as error:
+            messagebox.showerror('Check links', str(error), parent=root)
+            return
+        folder = destination.get().strip()
         if not folder:
             messagebox.showerror('Choose a folder', 'Choose where to save the video.', parent=root)
             return
-        selected = files.curselection()
-        client = state['client'] if state['link'] == url else None
-        chosen = state['videos'][selected[0]] if client and selected else None
         profile = profile_options.get(source.get())
         stop.clear()
+        state['downloading'] = True
         busy(True)
         progress['value'] = 0
+        state['queue'] = [(link, 'Waiting') for link in links]
+        render_queue()
         def work():
             try:
-                # Always reread Firefox and refresh page tokens, including after selecting a video.
-                fresh = TeraBox(stop, emit_status, profile)
-                videos = fresh.find_videos(url)
-                if chosen:
-                    current = next((video for video in videos if video.fid == chosen.fid), None)
-                    if current is None:
-                        raise DownloadError('The selected video is no longer in this share. Paste the link again.')
-                    transfer(fresh, current, folder)
-                else:
-                    if len(videos) == 1:
-                        transfer(fresh, videos[0], folder)
-                    else:
-                        # Keep metadata only in the UI between operations, not a live cookie jar.
-                        events.put(('videos', (url, True, videos)))
+                completed, failures = download_queue(
+                    links, folder, profile, stop,
+                    lambda kind, data: events.put((kind, data)), pause=pause)
+                events.put(('summary', (completed, failures)))
             except Cancelled as error:
                 events.put(('cancelled', str(error)))
             except (DownloadError, ValueError, OSError) as error:
-                # Avoid displaying raw transport errors containing signed URLs.
                 message = str(error) if isinstance(error, DownloadError) else 'The download could not complete. Check the destination and connection, then retry.'
                 events.put(('error', message))
             except Exception:
-                events.put(('error', 'TeraBox returned an unexpected response. No completed video was saved.'))
+                events.put(('error', 'TeraBox returned an unexpected response. Completed downloads were kept.'))
             finally:
                 events.put(('idle', None))
         threading.Thread(target=work, daemon=True).start()
 
-    button = ttk.Button(actions, text='Download', command=start)
+    button = ttk.Button(actions, text='Download queue', command=start_queue)
     button.pack(side='left')
+    def toggle_pause():
+        if not state['downloading'] or stop.is_set():
+            return
+        if pause.is_set():
+            pause.clear()
+            pause_button.configure(text='Pause')
+            status.set('Resuming…')
+        else:
+            pause.set()
+            pause_button.configure(text='Resume')
+            status.set('Pausing… waiting for the current network request to finish.')
+    pause_button = ttk.Button(actions, text='Pause', command=toggle_pause, state='disabled')
+    pause_button.pack(side='left', padx=(8, 0))
     def cancel():
         stop.set()
+        pause.clear()
+        pause_button.configure(state='disabled')
         status.set('Cancelling… waiting for the current network request to finish.')
     cancel_button = ttk.Button(actions, text='Cancel', command=cancel, state='disabled')
     cancel_button.pack(side='left', padx=8)
@@ -526,28 +616,41 @@ def gui():
         while not events.empty():
             kind, data = events.get()
             if kind == 'status':
-                status.set(data)
+                if isinstance(data, tuple):
+                    index, text = data
+                    message = f'Link {index + 1}/{len(state["queue"])}: {text}'
+                else:
+                    text = message = data
+                if stop.is_set():
+                    continue
+                if pause.is_set():
+                    if text == PAUSED_STATUS:
+                        status.set(message)
+                elif text != PAUSED_STATUS:
+                    status.set(message)
             elif kind == 'login':
                 login_status.set(data)
                 status.set('Login check finished.')
-            elif kind == 'videos':
-                state['link'], state['client'], state['videos'] = data
-                files.delete(0, 'end')
-                for video in state['videos']:
-                    files.insert('end', f'{human_size(video.size)}  ·  {video.name}')
-                files.selection_set(0)
-                status.set('Select a video, then click Download.')
+            elif kind == 'queue':
+                index, item_status = data
+                link, _ = state['queue'][index]
+                state['queue'][index] = (link, item_status)
+                render_queue()
             elif kind == 'progress':
-                received, total = data
+                index, received, total = data
                 progress['value'] = received / total * 100
-                status.set(f'{human_size(received)} of {human_size(total)} — {received / total:.0%}')
-            elif kind == 'done':
-                status.set('Saved: ' + data)
-                progress['value'] = 100
+                if not pause.is_set() and not stop.is_set():
+                    status.set(f'Link {index + 1}/{len(state["queue"])}: {human_size(received)} of {human_size(total)} — {received / total:.0%}')
+            elif kind == 'summary':
+                completed, failures = data
+                progress['value'] = 100 if completed else 0
+                status.set(f'Queue finished: {len(completed)} saved, {len(failures)} failed.')
+                for path in completed:
+                    files.insert('end', 'Saved: ' + path)
+                for failure in failures:
+                    files.insert('end', 'Failed: ' + failure.split('\n')[0])
             elif kind in ('error', 'cancelled'):
                 status.set(data.split('\n')[0])
-                if kind == 'error' and not state['closing']:
-                    messagebox.showerror('Download unavailable', data, parent=root)
             elif kind == 'idle':
                 busy(False)
                 if state['closing']:

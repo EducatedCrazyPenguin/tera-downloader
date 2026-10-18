@@ -6,8 +6,15 @@
 2. Leave your usual **Firefox profile** selected. Click **Login in Firefox**, open
    your share and sign into TeraBox in a normal tab.
 3. Click **Check login** in Tera. Once verified, the profile choice is remembered.
-4. Paste your link and click **Download**. A single video downloads automatically.
-   For a folder, select a video from the list and click **Download** again.
+4. Paste share links one per line or separated by commas and click **Download
+   queue**. Tera downloads every video in the first share before moving to the
+   next link. Blank lines are ignored; invalid links are reported before the
+   queue starts.
+5. Click **Pause** to hold the current download and remaining queue, then
+   **Resume** to continue from the same position. Keep Tera open while paused.
+   **Pausing…** means the current network read is still finishing; **Paused**
+   confirms the worker has stopped reading. Cancel and closing Tera still cancel
+   the queue and remove its current temporary file; completed videos are kept.
 
 TeraBox aliases from `terasharelink.com`, `terasharefile.com`, and
 `terafileshare.com` are accepted in both `/s/1…` and `sharing/link?surl=…`
@@ -34,7 +41,9 @@ expose cookie export, so signing in there alone does not connect this downloader
 - Requests and redirects are limited to supported TeraBox domains. There are no
   external download proxies, link resolvers, telemetry or cookie uploads.
 - A system VPN applies normally. A Firefox-only VPN extension does not route
-  this app. Tera does not verify or enforce VPN connectivity.
+  this app. Tera does not verify or enforce VPN connectivity. If Firefox itself
+  cannot open a share without a VPN, the network is blocking or interrupting
+  TeraBox; Tera uses direct connections only and cannot bypass that restriction.
 
 ## Verification and limits
 
@@ -45,9 +54,19 @@ Some shares do not provide download URLs without an authenticated session.
 
 Original files are kept temporary until the byte count matches the share size.
 Previews and HLS playlists are rejected. Existing files are not overwritten;
-cancelled or failed transfers remove only their own temporary file. Downloads
-restart from zero after interruption. Rate limits, expired links, account limits,
-share restrictions and future TeraBox changes can still cause failures.
+cancelled or failed transfers remove only their own temporary file. A queue
+continues after an individual link or video fails and shows the completed and
+failed items at the end. Pause keeps the current connection and downloaded bytes
+only while Tera stays open. A long pause can fail if the server closes the
+connection; there is no automatic reconnection or recovery after closing Tera.
+Cancelled or failed downloads restart from zero when started again. Rate
+limits, expired links, account limits, share restrictions and future TeraBox
+changes can still cause failures.
+
+Pause/Resume verification uses synthetic streams and an isolated Tkinter smoke
+check; it does not establish long-pause reliability against TeraBox.
+**Evidence: 2/3 — Offline checks cover the pause controls and transfer logic;
+live server behavior during long pauses remains unverified.**
 
 The app does not silently retry anonymously when the selected Firefox session
 fails validation. TeraBox's own download restrictions still apply.
@@ -58,6 +77,7 @@ fails validation. TeraBox's own download restrictions still apply.
 python terabox.py --check "YOUR_TERABOX_LINK" --firefox
 python terabox.py --check "YOUR_TERABOX_LINK" --firefox --profile default-release
 python -m unittest -v
+python smoke_terabox_gui.py  # Withdrawn Tkinter window; synthetic downloads only.
 ```
 
 Diagnostics do not print cookie values, account identifiers or signed download URLs.
