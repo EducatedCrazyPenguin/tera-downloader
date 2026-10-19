@@ -280,7 +280,7 @@ class TeraBox:
         folder.mkdir(parents=True, exist_ok=True)
         name = safe_name(video.name)
         target = folder / name
-        if target.exists():
+        if os.path.lexists(target):
             raise DownloadError('A file with this name already exists. Choose another folder or rename it.')
         temporary = folder / (name + '.' + safe_name(video.fid) + '.part')
         received = 0
@@ -311,7 +311,7 @@ class TeraBox:
                 raise DownloadError('The connection ended before the complete video arrived.')
             self.check_cancel()
             # Windows rename fails if target already exists; never replace an existing video.
-            if target.exists():
+            if os.path.lexists(target):
                 raise DownloadError('A file with this name appeared during the download.')
             temporary.rename(target)
             return target

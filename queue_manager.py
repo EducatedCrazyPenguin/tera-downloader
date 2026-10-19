@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+import os
 import queue
 import threading
 import time
@@ -12,10 +13,14 @@ import uuid
 
 from app_state import StateError, StateStore
 from firefox_session import FirefoxProfile
+from review_storage import (StorageError, available_space, input_key, preflight, prior_download,
+                            required_space, share_folder, share_key, target_paths)
 from terabox import Cancelled, DownloadError, PAUSED_STATUS, TeraBox, parse_links
+from terabox import safe_name
 
 
 TERMINAL = {'completed', 'failed', 'skipped', 'cancelled'}
+REVIEW = {'unreviewed', 'reviewing', 'review', 'excluded'}
 
 
 class SpeedMeter:
@@ -57,6 +62,10 @@ class Job:
     error: str = ''
     finished: float = 0.0
     source_blocked: bool = False
+    identity: str = ''
+    output_name: str = ''
+    receipt: dict = field(default_factory=dict)
+    per_share: bool = False
 
 
 class QueueManager:
@@ -101,6 +110,12 @@ class QueueManager:
         self.intent = ''
         self.acknowledged = False
         self.error_hold = False
+        self.boundary = False
+        self.review_active = None
+        self.review_worker = None
+        self.review_cancel = threading.Event()
+        self.review_requested = set()
+        self.review_space = {}
         self.message = 'Add links, then Start. Restored jobs wait for your instruction.'
         self.run_ids = set()
         self.meter = SpeedMeter()
@@ -112,11 +127,13 @@ class QueueManager:
                 for row in store.load_jobs():
                     job = Job(**row)
                     parse_links(job.link)
-                    if job.status not in TERMINAL | {'pending', 'resolving', 'downloading'}:
+                    if job.status not in TERMINAL | REVIEW | {'pending', 'resolving', 'downloading', 'attention'}:
                         raise ValueError('Invalid status')
                     if job.video and (set(job.video) != {'name', 'size', 'fid'} or int(job.video['size']) <= 0):
                         raise ValueError('Invalid metadata')
-                    if job.status not in TERMINAL:
+                    if job.status == 'reviewing':
+                        job.status = 'unreviewed'
+                    elif job.status not in TERMINAL | REVIEW | {'attention'}:
                         job.status = 'pending'
                         job.received = 0
                     self.jobs.append(job)
@@ -137,6 +154,7 @@ class QueueManager:
                 try:
                     value = self._handle(action, data)
                     if action != 'snapshot':
+                        self._advance_review()
                         self._advance()
                         self._publish()
                     if reply:
@@ -152,7 +170,7 @@ class QueueManager:
                     self.events.put(('error', message))
                     if reply:
                         reply.put((False, StateError(message)))
-                if self.closing and not self.active:
+                if self.closing and not self.active and not self.review_active:
                     self._save()
                     break
         except Exception as error:
@@ -160,9 +178,12 @@ class QueueManager:
             self.events.put(('error', str(self.startup_error)))
         finally:
             self.cancel.set()
+            self.review_cancel.set()
             self.pause.clear()
             if self.worker:
                 self.worker.join(26)
+            if self.review_worker:
+                self.review_worker.join(26)
             if store:
                 store.close()
             self.ready.set()
@@ -191,6 +212,115 @@ class QueueManager:
     def _handle(self, action, data):
         if action == 'snapshot':
             return self._snapshot()
+        if action == 'review_saved':
+            self.review_requested.update(j.id for j in self.jobs if j.status == 'unreviewed' and not j.source_blocked)
+            return
+        if action == 'review_choice':
+            job = self._job(data['job_id'])
+            if job.status not in {'review', 'excluded'}:
+                raise DownloadError('Wait for review to finish.')
+            job.status = 'excluded' if job.status == 'review' else 'review'
+            self._save()
+            return
+        if action == 'review':
+            links = parse_links('\n'.join(data['links']))
+            folder = str(Path(data['folder']).resolve())
+            profile = data.get('profile')
+            reference = {'name': profile.name, 'path': str(profile.path)} if profile else None
+            self.preferences = self.store.save_preferences({'last_destination': folder})
+            existing = {input_key(j.link) for j in self.jobs
+                        if j.status not in TERMINAL | {'unreviewed', 'excluded'} and not j.source_blocked}
+            added = []
+            for link in links:
+                key = input_key(link)
+                if key in existing:
+                    continue
+                existing.add(key)
+                old = next((j for j in self.jobs if j.status == 'unreviewed' and input_key(j.link) == key), None)
+                if old:
+                    added.append(old)
+                else:
+                    job = Job(uuid.uuid4().hex, link, folder, reference, status='unreviewed', per_share=bool(data.get('per_share')))
+                    self.jobs.append(job)
+                    added.append(job)
+            self._save()
+            self.review_requested.update(j.id for j in added)
+            if self.error_hold and not self.active:
+                self.error_hold = False
+                self.pause.clear()
+                self.acknowledged = False
+            self.message = 'Reading shares for review…' if added else 'These shares are already in Review or Queue.'
+            self.events.put(('added', [job.id for job in added]))
+            return [job.id for job in added]
+        if action == 'select':
+            selected = set(data['job_ids'])
+            for job in self.jobs:
+                if job.status not in {'review', 'excluded'}:
+                    continue
+                duplicate = self._duplicate(job)
+                job.status = 'pending' if job.id in selected and not duplicate and not job.source_blocked else 'excluded'
+                job.error = duplicate
+                if job.status == 'pending' and self.running:
+                    self.run_ids.add(job.id)
+            self._save()
+            if data.get('start', True) and not self.running and not self.pause.is_set():
+                self._handle('start', {})
+            self.message = 'Selected files queued.' if not self.pause.is_set() else 'Selected files queued. Resume when ready.'
+            return
+        if action == 'destination':
+            job = self._job(data['job_id'])
+            if job.status not in {'pending', 'attention', 'review', 'excluded'}:
+                raise DownloadError('Stop the active file before changing its destination; it must restart from zero.')
+            if 'name' in data:
+                name = data['name']
+                if not name or name != safe_name(name):
+                    raise DownloadError('Use a plain, safe file name without folders or reserved characters.')
+                if not job.video:
+                    raise DownloadError('Review the share before choosing a file name.')
+                job.output_name = name
+            if 'folder' in data:
+                if not data['folder'].strip():
+                    raise DownloadError('Choose a destination folder.')
+                job.folder = str(Path(data['folder']).resolve())
+            if job.status == 'attention':
+                job.status = 'pending'
+            job.error = ''
+            try:
+                self.review_space[job.folder] = available_space(job.folder)
+            except OSError:
+                self.review_space[job.folder] = None
+            self._save()
+            self.message = 'Destination updated. Resume when ready.'
+            return
+        if action == '_review_result':
+            if data['job_id'] != self.review_active:
+                return
+            job = self._job(data['job_id'])
+            self.review_worker.join(1)
+            self.review_worker, self.review_active = None, None
+            if self.closing or self.review_cancel.is_set() or data['outcome'] == 'cancelled':
+                job.status = 'unreviewed'
+            elif data['outcome'] == 'discovered':
+                identity, videos = data['value']
+                folder = str(share_folder(job.folder, job.link, identity)) if job.per_share else job.folder
+                position = self.jobs.index(job)
+                reviewed = [replace(job, id=job.id if index == 0 else uuid.uuid4().hex,
+                                    video=video, folder=folder, status='review', identity=identity, error='')
+                            for index, video in enumerate(videos)]
+                self.jobs[position:position + 1] = reviewed
+                for item in reviewed:
+                    item.error = self._duplicate(item, in_review=True)
+                    if item.error:
+                        item.status = 'excluded'
+                try:
+                    self.review_space[folder] = available_space(folder)
+                except OSError:
+                    self.review_space[folder] = None
+                self.message = f'{len(videos)} video(s) ready for review. Choose files, then Download selected.' if not self.running else self.message
+            else:
+                job.status, job.error, job.finished = 'failed', data['value'], time.time()
+            self._save()
+            return
         if action == 'add':
             links = parse_links('\n'.join(data['links']))
             folder = str(Path(data['folder']).resolve())
@@ -220,7 +350,7 @@ class QueueManager:
             self.preferences = self.store.save_preferences(changes)
             return
         if action == 'disconnect':
-            if self.running or self.active:
+            if self.running or self.active or self.review_active:
                 raise DownloadError('Stop the queue before disconnecting Firefox.')
             self.preferences = self.store.save_preferences({'firefox_profile': None})
             for job in self.jobs:
@@ -242,10 +372,14 @@ class QueueManager:
                 self.error_hold = False
             if self.active and self.intent:
                 raise DownloadError('Wait for the current stop operation to finish.')
+            for job in self.jobs:
+                if job.status == 'attention':
+                    job.status, job.error = 'pending', ''
             if not self.running:
                 self.run_ids = {j.id for j in self.jobs if j.status == 'pending'}
                 self.running = bool(self.run_ids or self.active)
             self.pause.clear()
+            self.boundary = False
             self.acknowledged = False
             current = self._job(self.active).received if self.active else 0
             self.meter.reset(current)
@@ -254,8 +388,17 @@ class QueueManager:
         if action == 'pause':
             if self.running:
                 self.pause.set()
+                self.boundary = False
                 self.acknowledged = not bool(self.active)
-                self.message = 'Pausing… waiting for the current network request.'
+                self.message = PAUSED_STATUS if self.acknowledged else 'Pausing… waiting for the current network request.'
+            return
+        if action == 'pause_after':
+            if self.running:
+                if self.active and self._job(self.active).video and not self.pause.is_set():
+                    self.boundary = True
+                    self.message = 'Finishing the current file, then pausing. Resume will be required.'
+                else:
+                    self._handle('pause', {})
             return
         if action == 'move':
             job = self._job(data['job_id'])
@@ -270,9 +413,12 @@ class QueueManager:
             return
         if action == 'remove':
             job = self._job(data['job_id'])
-            if job.status != 'pending':
+            if job.status not in {'pending', 'attention'} | REVIEW:
                 raise DownloadError('Only pending jobs can be removed. Use Skip for the active file.')
+            if job.id == self.review_active:
+                raise DownloadError('Wait for this review to finish before removing it.')
             self.jobs.remove(job)
+            self.review_requested.discard(job.id)
             self._save()
             return
         if action == 'retry':
@@ -280,7 +426,7 @@ class QueueManager:
             count = 0
             for job in self.jobs:
                 if job.id in selected and job.status == 'failed' and not job.source_blocked:
-                    job.status, job.error, job.received, job.finished = 'pending', '', 0, 0
+                    job.status, job.error, job.received, job.finished = ('pending' if job.video else 'unreviewed'), '', 0, 0
                     count += 1
                     if self.running:
                         self.run_ids.add(job.id)
@@ -291,15 +437,27 @@ class QueueManager:
             if self.running or self.active:
                 raise DownloadError('Finish or stop the queue before clearing history.')
             self.jobs = [j for j in self.jobs if j.status not in TERMINAL]
+            for job in self.jobs:
+                if job.status in {'review', 'excluded'}:
+                    job.error = self._duplicate(job, in_review=True)
             self._save()
             self.message = 'History cleared. Downloaded files were kept.'
             return
         if action in ('skip', 'cancel', 'close'):
+            if action == 'skip' and not self.active:
+                job = self._job(data['job_id']) if data.get('job_id') else next((j for j in self.jobs if j.status == 'attention'), None)
+                if job and job.status in {'attention', 'pending'}:
+                    job.status, job.finished, job.error = 'skipped', time.time(), ''
+                    self._save()
+                return
             if action != 'skip':
                 self.running = False
+                self.boundary = False
                 self.pause.clear()
+                self.review_cancel.set()
+                self.review_requested.clear()
                 for job in self.jobs:
-                    if job.status == 'pending' and action == 'cancel':
+                    if job.status in {'pending', 'attention'} and action == 'cancel':
                         job.status = 'cancelled'
                         job.finished = time.time()
             if action == 'close':
@@ -324,7 +482,7 @@ class QueueManager:
                 if data['text'] == PAUSED_STATUS and self.pause.is_set() and not self.intent:
                     self.acknowledged = True
                     self.message = PAUSED_STATUS
-                elif not self.pause.is_set() and not self.intent and data['text'] != PAUSED_STATUS:
+                elif not self.pause.is_set() and not self.intent and not self.boundary and data['text'] != PAUSED_STATUS:
                     self.message = data['text']
             elif action == '_progress':
                 job.received = data['received']
@@ -343,6 +501,11 @@ class QueueManager:
                     job.status, job.path = 'completed', value
                     job.received = job.video['size']
                     job.finished = time.time()
+                    try:
+                        info = Path(value).stat()
+                        job.receipt = {'size': info.st_size, 'mtime_ns': info.st_mtime_ns}
+                    except OSError:
+                        job.receipt = {}
                 elif self.intent == 'close':
                     job.status, job.received = 'pending', 0
                 elif self.error_hold:
@@ -350,11 +513,26 @@ class QueueManager:
                 elif self.intent in ('skip', 'cancel'):
                     job.status = 'skipped' if self.intent == 'skip' else 'cancelled'
                     job.received, job.finished = 0, time.time()
+                elif outcome == 'storage':
+                    job.status, job.error, job.received = 'attention', value, 0
+                    self.pause.set()
+                    self.acknowledged = True
+                    self.message = value
                 else:
                     job.status, job.error, job.received, job.finished = 'failed', value, 0, time.time()
                 self.worker.join(1)
                 self.worker = None
                 self.active, self.intent = None, ''
+                if self.boundary:
+                    self.boundary = False
+                    self.pause.set()
+                    self.acknowledged = True
+                    if job.status != 'attention':
+                        self.message = 'Paused after the current file. Click Resume to continue.'
+                elif self.pause.is_set() and not self.error_hold:
+                    self.acknowledged = True
+                    if job.status != 'attention':
+                        self.message = PAUSED_STATUS
                 self._save()
             return
         raise DownloadError('Unsupported queue action.')
@@ -376,14 +554,78 @@ class QueueManager:
         self.cancel = threading.Event()
         self.meter.reset()
         self._save()
-        self.worker = threading.Thread(target=self._transfer, args=(deepcopy(job), self.cancel),
+        pending = [(j.folder, j.video['size']) for j in self.jobs if j.video and j.status in {'pending', 'downloading'}]
+        self.worker = threading.Thread(target=self._transfer, args=(deepcopy(job), self.cancel, pending),
                                        name='Tera transfer', daemon=True)
         self.worker.start()
 
-    def _transfer(self, job, cancel):
+    def _duplicate(self, job, in_review=False):
+        if not job.video or not job.identity:
+            return ''
+        for other in self.jobs:
+            if other.id == job.id or not other.video:
+                continue
+            if (other.identity, other.video['fid'], other.video['size']) != (job.identity, job.video['fid'], job.video['size']):
+                continue
+            if other.status in {'pending', 'downloading', 'resolving', 'attention'}:
+                return 'Already queued.'
+            if other.status == 'completed' and prior_download(other.path, other.receipt, job.video['size']):
+                return 'Prior download: recorded size and modification time still match.'
+            if in_review and other.status == 'review' and self.jobs.index(other) < self.jobs.index(job):
+                return 'Already selected in Review.'
+        return ''
+
+    @staticmethod
+    def _metadata(videos):
+        if not videos or any(not isinstance(v.name, str) or not v.name or not isinstance(v.fid, str) or not v.fid
+                             or not isinstance(v.size, int) or isinstance(v.size, bool) or v.size <= 0 for v in videos):
+            raise DownloadError('TeraBox returned invalid file metadata. No file was downloaded.')
+        result, seen = [], set()
+        for video in videos:
+            key = (video.fid, video.size)
+            if key not in seen:
+                seen.add(key)
+                result.append({'name': video.name, 'size': video.size, 'fid': video.fid})
+        return result
+
+    def _advance_review(self):
+        self.review_requested.intersection_update(j.id for j in self.jobs if j.status == 'unreviewed')
+        if self.closing or self.error_hold or self.review_active:
+            return
+        job = next((j for j in self.jobs if j.id in self.review_requested and j.status == 'unreviewed'), None)
+        if job is None:
+            return
+        self.review_requested.discard(job.id)
+        job.status = 'reviewing'
+        self._save()
+        self.review_active = job.id
+        self.review_cancel = threading.Event()
+        self.review_worker = threading.Thread(target=self._review, args=(deepcopy(job), self.review_cancel), name='Tera review', daemon=True)
+        self.review_worker.start()
+
+    def _review(self, job, cancel):
+        try:
+            reference = job.profile
+            profile = FirefoxProfile(reference['name'], Path(reference['path'])) if reference else None
+            client = self.client_factory(cancel, lambda text: None, profile)
+            videos = self._metadata(client.find_videos(job.link))
+            value, outcome = (share_key(job.link, getattr(client, 'metadata', {})), videos), 'discovered'
+        except Cancelled:
+            value, outcome = '', 'cancelled'
+        except DownloadError as error:
+            value, outcome = str(error), 'failed'
+        except Exception:
+            value, outcome = 'The share could not be reviewed. Check the connection and try again.', 'failed'
+        self.post('_review_result', job_id=job.id, outcome=outcome, value=value)
+
+    def _transfer(self, job, cancel, pending):
         def emit(action, **data):
             self.post(action, job_id=job.id, attempt=job.attempt, **data)
         try:
+            if job.video:
+                # Other chosen folders on the same disk also consume the available space.
+                needed = required_space(job.folder, pending)
+                preflight(job.folder, needed, job.output_name or job.video['name'], job.video['fid'])
             reference = job.profile
             profile = FirefoxProfile(reference['name'], Path(reference['path'])) if reference else None
             client = self.client_factory(cancel, lambda text: emit('_status', text=text), profile, pause=self.pause)
@@ -391,14 +633,12 @@ class QueueManager:
             if not videos:
                 raise DownloadError('No supported videos were found.')
             if job.video is None:
-                if any(not isinstance(v.name, str) or not v.name or not isinstance(v.fid, str) or not v.fid
-                       or not isinstance(v.size, int) or v.size <= 0 for v in videos):
-                    raise DownloadError('TeraBox returned invalid file metadata. No file was downloaded.')
-                value = [{'name': v.name, 'size': v.size, 'fid': v.fid} for v in videos]
+                value = self._metadata(videos)
                 outcome = 'discovered'
             else:
                 video = next((v for v in videos if v.fid == job.video['fid']), None)
-                if video is None or video.size != job.video['size']:
+                if (video is None or video.size != job.video['size'] or video.name != job.video['name']
+                        or job.identity and share_key(job.link, getattr(client, 'metadata', {})) != job.identity):
                     raise DownloadError('The selected file changed or is no longer available. Add the share again.')
                 last = [0.0]
                 def update(received, total):
@@ -406,12 +646,20 @@ class QueueManager:
                     if now - last[0] >= .15 or received == total:
                         emit('_progress', received=received, total=total)
                         last[0] = now
+                if job.output_name:
+                    video = replace(video, name=job.output_name)
                 value = str(client.download(video, job.folder, update))
                 outcome = 'completed'
         except Cancelled:
             outcome, value = 'cancelled', 'The operation was cancelled.'
+        except StorageError as error:
+            outcome, value = 'storage', str(error)
+        except OSError:
+            outcome, value = 'storage', 'The file could not be saved. Check free space or choose another folder, then Resume.'
         except DownloadError as error:
             outcome, value = 'failed', str(error)
+            if job.video and any(os.path.lexists(path) for path in target_paths(job.folder, job.output_name or job.video['name'], job.video['fid'])):
+                outcome, value = 'storage', 'A file or partial with this name exists. Rename, choose another folder, or Skip.'
         except Exception:
             outcome, value = 'failed', 'The file could not be saved. Check the destination and connection, then retry.'
         emit('_result', outcome=outcome, value=value)
@@ -427,6 +675,8 @@ class QueueManager:
                          'active': self.active, 'running': self.running, 'paused': self.pause.is_set(),
                          'stopping': bool(self.intent) or bool(self.error_hold and self.active),
                          'pause_acknowledged': self.acknowledged, 'closing': self.closing,
+                         'pause_after': self.boundary, 'review_busy': bool(self.review_active or self.review_requested),
+                         'review_space': self.review_space,
                          'message': self.message, 'speed': speed, 'received': received, 'total': total,
                          'unknown': unknown, 'eta': (total - received) / speed if speed and not unknown else None})
 

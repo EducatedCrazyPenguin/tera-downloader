@@ -1,22 +1,26 @@
-"""Opt-in native Tkinter smoke check: python smoke_terabox_gui.py.
+"""Opt-in native check: withdrawn task-owned Tk roots, synthetic streams only.
 
-Uses a withdrawn, task-owned window, synthetic streams and temporary files.
-Never reads Firefox profiles/settings, connects to TeraBox or launches children.
+No profiles/settings from the user, shell opens, network, or child processes.
 """
 import io
 import os
+import runpy
 import tempfile
 import time
-import traceback
 import tkinter as tk
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import terabox
+from app_state import StateError
 from firefox_session import FirefoxProfile
+from queue_manager import QueueManager
+from tera_gui import TeraApp
 
 
-BODY = b'synthetic video\n' * (256 * 1024)
+BODY = b'synthetic video\n' * (128 * 1024)
+LINK = 'https://terabox.com/s/1synthetic'
 
 
 class SyntheticResponse(io.BytesIO):
@@ -29,20 +33,28 @@ class SyntheticResponse(io.BytesIO):
 
 
 class SyntheticClient(terabox.TeraBox):
-    instances = []
+    calls = []
+    fail_once = True
 
     def __init__(self, cancel, status, profile, pause=None):
         super().__init__(cancel, status, pause=pause)
-        self.instances.append(self)
 
     def find_videos(self, link):
-        return [terabox.Video(name, len(BODY), str(index), 'https://terabox.com/synthetic')
-                for index, name in enumerate(('first.mp4', 'second.mp4'))]
+        self.calls.append(('list', link))
+        self.metadata = {'shareid': '123' if 'synthetic' in link else '456'}
+        return [terabox.Video(name + '.mp4', len(BODY), name, 'https://terabox.com/synthetic')
+                for name in ('first', 'broken', 'last')]
 
     def verify_login(self):
-        self.cancel.wait(.15)
+        self.cancel.wait(.05)
         self.check_cancel()
-        return True
+
+    def download(self, video, folder, progress):
+        self.calls.append(('download', video.fid))
+        if video.fid == 'broken' and type(self).fail_once:
+            type(self).fail_once = False
+            raise terabox.DownloadError('Synthetic unavailable file.')
+        return super().download(video, folder, progress)
 
     def open(self, *args, **kwargs):
         self.check_cancel()
@@ -50,216 +62,191 @@ class SyntheticClient(terabox.TeraBox):
 
 
 def main():
-    print(f'Smoke PID {os.getpid()}; Python native Tk {tk.TkVersion}; withdrawn window; synthetic data only', flush=True)
-    from queue_manager import QueueManager
-    from app_state import StateError
-    from tera_gui import TeraApp
-    from terabox import DownloadError
+    print(f'Smoke PID {os.getpid()}; native Tk {tk.TkVersion}; withdrawn windows; synthetic data only', flush=True)
+    SyntheticClient.calls, SyntheticClient.fail_once = [], True
+    with tempfile.TemporaryDirectory(prefix='tera-smoke-', dir=Path(__file__).parent) as directory, \
+         patch('urllib.request.OpenerDirector.open', side_effect=AssertionError('Unexpected network')), \
+         patch('tera_gui.profiles', side_effect=AssertionError('Unexpected real profile read')):
+        base = Path(directory)
+        owned, errors = [], []
+        expires = time.monotonic() + 50
 
-    class ProductClient(SyntheticClient):
-        calls = []
-        fail_once = True
-
-        def find_videos(self, link):
-            self.calls.append(('list', link))
-            return [terabox.Video(name + '.mp4', len(BODY), name, 'https://terabox.com/synthetic')
-                    for name in ('first', 'broken', 'last')]
-
-        def download(self, video, folder, progress=lambda done, total: None):
-            self.calls.append(('download', video.fid))
-            if video.fid == 'broken' and type(self).fail_once:
-                type(self).fail_once = False
-                raise DownloadError('Synthetic unavailable file.')
-            return super().download(video, folder, progress)
-
-    with tempfile.TemporaryDirectory(prefix='tera-smoke-', dir=Path(__file__).parent) as folder:
-        base = Path(folder)
-        errors = []
-        state = {'step': 'login', 'again': False}
-        original_ids = []
-        injection = [None]
-        sources = [FirefoxProfile('Synthetic', base / 'profile')]
-        calls_before_restore = None
-        for reopen in (False, True):
-            manager = QueueManager(base / 'state', ProductClient)
+        def create():
+            manager = QueueManager(base / 'state', SyntheticClient)
             root = tk.Tk()
             root.withdraw()
-            app = TeraApp(root, manager, ProductClient, available_profiles=sources)
-            deadline = time.monotonic() + 20
-            if reopen:
-                state['step'] = 'restored'
+            root.report_callback_exception = lambda kind, error, trace: errors.append(error)
+            app = TeraApp(root, manager, SyntheticClient, [FirefoxProfile('Synthetic', base / 'profile')])
+            owned.append((root, manager, app))
+            return root, manager, app
 
-            def fail(error):
-                errors.append((state['step'], repr(error), traceback.format_exc()))
-                if injection[0] is not None:
-                    injection[0].stop()
-                    injection[0] = None
-                manager.post('close')
-                manager.closed.wait(3)
-                root.destroy()
+        def wait(predicate, label, seconds=5):
+            deadline = min(expires, time.monotonic() + seconds)
+            while time.monotonic() < deadline:
+                root.update()
+                assert not errors, errors
+                if predicate():
+                    return app.snapshot
+                time.sleep(.01)
+            raise AssertionError(f'{label}: {app.status.get()}; ' + repr([(j['status'], j['error']) for j in (app.snapshot or {}).get('jobs', [])]))
 
-            root.report_callback_exception = lambda kind, error, trace: fail(error)
+        def submit(link, folder, per_share=False):
+            app.destination.set(str(folder))
+            app.per_share.set(per_share)
+            app.links_box.delete('1.0', 'end')
+            app.links_box.insert('1.0', link)
+            app.add_button.invoke()
+            wait(lambda: app.pending_add is None and not app.snapshot['review_busy'], 'review completed')
 
-            def drive():
-                try:
-                    assert time.monotonic() < deadline, f'Smoke timeout: {state}'
-                    if not app.initialized:
-                        root.after(20, drive)
-                        return
-                    snapshot = app.snapshot
-                    step = state['step']
-                    if step == 'login':
-                        app.source_box.current(1)
-                        app.source_changed()
-                        app.check_button.invoke()
-                        assert app.pause_button.instate(['disabled'])
-                        state['step'] = 'checking'
-                    elif step == 'checking' and not app.login_busy:
-                        assert 'verified' in app.login_status.get()
-                        app.disconnect_button.invoke()
-                        app.destination.set(str(base / 'videos'))
-                        with patch('tera_gui.simpledialog.askstring', return_value='Movies'):
-                            app.favorite_button.invoke()
-                        state['step'] = 'favorite'
-                    elif step == 'favorite' and snapshot['preferences'].get('favorites'):
-                        app.destination.set(str(base / 'wrong'))
-                        app.favorite.set('Movies')
-                        app.choose_favorite()
-                        assert app.destination.get() == str(base / 'videos')
-                        injection[0] = patch('app_state.protect', side_effect=StateError('Synthetic link protection failure.'))
-                        injection[0].start()
-                        app.links_box.insert('1.0', 'https://terabox.com/s/1synthetic')
-                        app.add_button.invoke()
-                        state['step'] = 'save_failed'
-                    elif step == 'save_failed' and app.pending_add is None and 'Synthetic link protection failure.' in app.status.get():
-                        assert app.links_box.get('1.0', 'end').strip() == 'https://terabox.com/s/1synthetic'
-                        assert not manager.request('snapshot')['jobs']
-                        assert ProductClient.calls == []
-                        injection[0].stop()
-                        injection[0] = None
-                        app.add_button.invoke()
-                        state['step'] = 'queued'
-                    elif step == 'queued' and snapshot['jobs']:
-                        app.start_button.invoke()
-                        state['step'] = 'downloading'
-                    elif step == 'downloading' and snapshot['received'] > 0:
-                        app.pause_button.invoke()
-                        assert 'Pausing' in app.status.get()
-                        state['step'] = 'pausing'
-                    elif step == 'pausing' and snapshot['pause_acknowledged']:
-                        assert snapshot['paused']
-                        assert snapshot['speed'] == 0 and snapshot['eta'] is None
-                        state.update(step='paused', received=snapshot['received'], until=time.monotonic() + .15)
-                    elif step == 'paused':
-                        assert snapshot['received'] == state['received']
-                        assert snapshot['speed'] == 0
-                        if time.monotonic() >= state['until']:
-                            if state['again']:
-                                app.start_button.invoke()
-                                state['step'] = 'finishing'
-                            else:
-                                last = next(j for j in snapshot['jobs'] if j['video'] and j['video']['fid'] == 'last')
-                                app.queue_tree.selection_set(last['id'])
-                                app.configure_controls()
-                                app.up_button.invoke()
-                                app.destination.set(str(base / 'extra'))
-                                app.links_box.insert('1.0', 'https://terabox.com/s/1anotherx')
-                                app.add_button.invoke()
-                                state['step'] = 'editing'
-                    elif step == 'editing' and len(snapshot['jobs']) == 4:
-                        added = next(j for j in snapshot['jobs'] if not j['video'])
-                        app.queue_tree.selection_set(added['id'])
-                        app.configure_controls()
-                        app.remove_button.invoke()
-                        state['step'] = 'removed'
-                    elif step == 'removed' and len(snapshot['jobs']) == 3:
-                        app.links_box.insert('1.0', 'https://terabox.com/s/1anotherx')
-                        app.add_button.invoke()
-                        state['step'] = 'added'
-                    elif step == 'added' and len(snapshot['jobs']) == 4:
-                        app.start_button.invoke()
-                        state['step'] = 'resume_then_pause'
-                    elif step == 'resume_then_pause' and not snapshot['paused']:
-                        app.pause_button.invoke()
-                        state.update(step='pausing', again=True)
-                    elif step == 'finishing' and not snapshot['running'] and not snapshot['active']:
-                        assert sum(j['status'] == 'completed' for j in snapshot['jobs']) == 5
-                        failed = [j for j in snapshot['jobs'] if j['status'] == 'failed']
-                        assert len(failed) == 1
-                        assert [c[1] for c in ProductClient.calls if c[0] == 'download'][:3] == ['first', 'last', 'broken']
-                        app.history_tree.selection_set(failed[0]['id'])
-                        app.configure_controls()
-                        app.retry_button.invoke()
-                        state['step'] = 'retry_ready'
-                    elif step == 'retry_ready' and any(j['status'] == 'pending' for j in snapshot['jobs']):
-                        assert not snapshot['running']
-                        app.start_button.invoke()
-                        state['step'] = 'retried'
-                    elif step == 'retried' and not snapshot['running'] and not snapshot['active'] and not any(j['status'] == 'pending' for j in snapshot['jobs']):
-                        assert len(snapshot['jobs']) == 6
-                        assert all(j['status'] == 'completed' and Path(j['path']).read_bytes() == BODY for j in snapshot['jobs']), [(j['status'], j['error']) for j in snapshot['jobs']]
-                        app.history_tree.selection_set(snapshot['jobs'][0]['id'])
-                        app.configure_controls()
-                        with patch('tera_gui.os.startfile') as opened:
-                            app.reveal_button.invoke()
-                            opened.assert_called_once_with(str(base / 'videos'))
-                        app.clear_button.invoke()
-                        state['step'] = 'cleared'
-                    elif step == 'cleared' and not snapshot['jobs']:
-                        assert len(list(base.glob('videos/*.mp4'))) == 3
-                        assert len(list(base.glob('extra/*.mp4'))) == 3
-                        app.destination.set(str(base / 'restore'))
-                        app.links_box.insert('1.0', 'https://terabox.com/s/1restorex')
-                        app.add_button.invoke()
-                        state['step'] = 'exit_ready'
-                    elif step == 'exit_ready' and snapshot['jobs']:
-                        app.start_button.invoke()
-                        state['step'] = 'exit_transfer'
-                    elif step == 'exit_transfer' and snapshot['received'] > 0:
-                        app.pause_button.invoke()
-                        state['step'] = 'exit_paused'
-                    elif step == 'exit_paused' and snapshot['pause_acknowledged']:
-                        original_ids[:] = [j['id'] for j in snapshot['jobs']]
-                        root.tk.call(root.protocol('WM_DELETE_WINDOW'))
-                        state['step'] = 'closing'
-                        return
-                    elif step == 'restored':
-                        assert [j['id'] for j in snapshot['jobs']] == original_ids
-                        assert all(j['status'] == 'pending' and j['received'] == 0 for j in snapshot['jobs'])
-                        assert not snapshot['running'] and not snapshot['active']
-                        assert len(ProductClient.calls) == calls_before_restore
-                        assert app.destination.get() == str(base / 'restore')
-                        assert snapshot['preferences']['favorites'][0]['name'] == 'Movies'
-                        assert snapshot['preferences']['firefox_profile'] is None
-                        assert not list(base.glob('restore/*.part'))
-                        app.start_button.invoke()
-                        state['step'] = 'restore_started'
-                    elif step == 'restore_started' and not snapshot['running'] and all(j['status'] == 'completed' for j in snapshot['jobs']):
-                        assert len(snapshot['jobs']) == 3
-                        assert all(Path(j['path']).read_bytes() == BODY for j in snapshot['jobs'])
-                        root.tk.call(root.protocol('WM_DELETE_WINDOW'))
-                        state['step'] = 'done'
-                        return
-                    root.after(20, drive)
-                except Exception as error:
-                    fail(error)
-
-            root.after(20, drive)
-            root.after(21000, lambda: fail(AssertionError('Window did not close')))
-            with patch('urllib.request.OpenerDirector.open', side_effect=AssertionError('Unexpected network')):
-                root.mainloop()
-            if not manager.closed.wait(3):
-                manager.post('close')
-                assert manager.closed.wait(3)
-            assert not errors, errors
+        try:
+            root, manager, app = create()
+            wait(lambda: app.initialized, 'initialization')
+            app.source_box.current(1)
+            app.source_changed()
+            app.check_button.invoke()
+            wait(lambda: not app.login_busy, 'synthetic login')
+            assert 'verified' in app.login_status.get()
+            app.disconnect_button.invoke()
+            app.destination.set(str(base / 'videos'))
+            with patch('tera_gui.simpledialog.askstring', return_value='Movies'):
+                app.favorite_button.invoke()
+            wait(lambda: bool(app.snapshot['preferences'].get('favorites')), 'favorite save')
+            app.destination.set(str(base / 'wrong'))
+            app.favorite.set('Movies')
+            app.choose_favorite()
+            assert app.destination.get() == str(base / 'videos')
+            with patch('app_state.protect', side_effect=StateError('Synthetic protection failure.')):
+                app.links_box.insert('1.0', LINK)
+                app.add_button.invoke()
+                wait(lambda: app.pending_add is None and 'Synthetic protection failure.' in app.status.get(), 'failed save')
+                assert not app.snapshot['jobs'] and not SyntheticClient.calls
+                assert app.links_box.get('1.0', 'end').strip() == LINK
+            submit(LINK + '\n' + LINK + '#view', base / 'videos')
+            assert len(app.snapshot['jobs']) == 3 and len(SyntheticClient.calls) == 1
+            assert '3 selected' in app.review_summary.get()
+            second = app.snapshot['jobs'][1]['id']
+            app.review_tree.selection_set(second)
+            app.toggle_review(SimpleNamespace(keysym='space'))
+            wait(lambda: app.snapshot['jobs'][1]['status'] == 'excluded', 'exclude video')
+            assert '2 selected' in app.review_summary.get()
+            app.download_button.invoke()
+            wait(lambda: app.snapshot['received'] > 0, 'download start')
+            app.pause_button.invoke()
+            wait(lambda: app.snapshot['pause_acknowledged'], 'pause acknowledged')
+            frozen = app.snapshot['received']
+            until = time.monotonic() + .15
+            wait(lambda: time.monotonic() >= until, 'paused wait')
+            assert app.snapshot['received'] == frozen and app.snapshot['speed'] == 0
+            assert app.snapshot['eta'] is None
+            app.start_button.invoke()
+            wait(lambda: not app.snapshot['paused'], 'resume')
+            app.pause_button.invoke()
+            wait(lambda: app.snapshot['pause_acknowledged'], 'rapid pause')
+            submit(LINK.replace('synthetic', 'anotherx'), base / 'extra', per_share=True)
+            additions = [j for j in app.snapshot['jobs'] if j['status'] == 'review']
+            assert len(additions) == 3
+            app.review_tree.selection_set(additions[0]['id'])
+            with patch('tera_gui.simpledialog.askstring', return_value='approved.mp4'):
+                app.rename_selected(app.review_tree)
+            wait(lambda: any(j['output_name'] == 'approved.mp4' for j in app.snapshot['jobs']), 'rename selection')
+            app.download_button.invoke()
+            wait(lambda: sum(j['status'] == 'pending' for j in app.snapshot['jobs']) == 4, 'append selection')
+            assert app.snapshot['paused']
+            last = next(j for j in app.snapshot['jobs'] if j['id'] == additions[-1]['id'])
+            app.queue_tree.selection_set(last['id'])
+            app.configure_controls()
+            app.up_button.invoke()
+            wait(lambda: [j['id'] for j in app.snapshot['jobs']].index(last['id']) < [j['id'] for j in app.snapshot['jobs']].index(additions[1]['id']), 'reorder')
+            app.remove_button.invoke()
+            wait(lambda: not any(j['id'] == last['id'] for j in app.snapshot['jobs']), 'remove pending')
+            app.start_button.invoke()
+            wait(lambda: not app.snapshot['paused'], 'resume for boundary')
+            app.boundary_button.invoke()
+            wait(lambda: app.snapshot['paused'] and not app.snapshot['active'], 'finish-current hold')
+            assert sum(j['status'] == 'completed' for j in app.snapshot['jobs']) == 1
+            assert app.boundary_button.instate(['disabled']) and app.start_button['text'] == 'Resume'
+            app.start_button.invoke()
+            wait(lambda: not app.snapshot['running'] and not app.snapshot['active'] and any(j['status'] == 'failed' for j in app.snapshot['jobs']), 'remaining downloads')
+            failed = next(j for j in app.snapshot['jobs'] if j['status'] == 'failed')
+            app.history_tree.selection_set(failed['id'])
+            app.configure_controls()
+            app.retry_button.invoke()
+            wait(lambda: any(j['status'] == 'pending' for j in app.snapshot['jobs']), 'retry queued')
+            app.start_button.invoke()
+            wait(lambda: not app.snapshot['running'] and not any(j['status'] in {'pending', 'downloading'} for j in app.snapshot['jobs']), 'retry complete')
+            completed = [j for j in app.snapshot['jobs'] if j['status'] == 'completed']
+            assert len(completed) == 4 and all(Path(j['path']).read_bytes() == BODY for j in completed)
+            app.history_tree.selection_set(completed[0]['id'])
+            app.configure_controls()
+            with patch('tera_gui.os.startfile') as opened:
+                app.reveal_button.invoke()
+                opened.assert_called_once_with(completed[0]['folder'])
+            submit(LINK.replace('terabox.com', 'terasharelink.com'), base / 'elsewhere')
+            duplicates = [j for j in app.snapshot['jobs'] if 'Prior download' in j['error']]
+            assert len(duplicates) == 2 and all(j['status'] == 'excluded' for j in duplicates)
+            # The excluded first share video remains downloadable from an alias.
+            reviews = [j for j in app.snapshot['jobs'] if j['status'] == 'review']
+            assert len(reviews) == 1
+            app.remove_selected(app.review_tree)  # no selected rows: harmless
+            app.clear_button.invoke()
+            wait(lambda: not any(j['status'] == 'completed' for j in app.snapshot['jobs']), 'history clear')
+            assert all(Path(j['path']).read_bytes() == BODY for j in completed)
+            # Existing target is held and user-approved folder correction works.
+            pending = reviews[0]
+            conflict = Path(pending['folder']) / pending['video']['name']
+            conflict.parent.mkdir(parents=True)
+            conflict.write_bytes(b'keep this file')
+            app.download_button.invoke()
+            wait(lambda: any(j['status'] == 'attention' for j in app.snapshot['jobs']), 'conflict hold')
+            app.queue_tree.selection_set(pending['id'])
+            with patch('tera_gui.filedialog.askdirectory', return_value=str(base / 'corrected')):
+                app.change_destination(app.queue_tree)
+            wait(lambda: any(j['id'] == pending['id'] and j['status'] == 'pending' for j in app.snapshot['jobs']), 'folder correction')
+            app.start_button.invoke()
+            wait(lambda: any(j['id'] == pending['id'] and j['status'] == 'completed' for j in app.snapshot['jobs']), 'corrected file')
+            assert conflict.read_bytes() == b'keep this file'
+            submit(LINK.replace('synthetic', 'restorex'), base / 'restore')
+            app.download_button.invoke()
+            wait(lambda: bool(app.snapshot['active']) and app.snapshot['received'] > 0, 'cancel transfer')
+            app.cancel_button.invoke()
+            wait(lambda: not app.snapshot['active'] and not app.snapshot['running'], 'cancel complete')
+            assert not list(base.glob('restore/*.part'))
+            assert app.pause_button.instate(['disabled']) and app.cancel_button.instate(['disabled'])
+            submit(LINK.replace('synthetic', 'restore2x'), base / 'restore2')
+            app.download_button.invoke()
+            wait(lambda: bool(app.snapshot['active']), 'save/exit transfer')
+            app.pause_button.invoke()
+            wait(lambda: app.snapshot['pause_acknowledged'], 'save/exit pause')
+            original = [j['id'] for j in app.snapshot['jobs']]
+            root.tk.call(root.protocol('WM_DELETE_WINDOW'))
+            wait(lambda: manager.closed.is_set() and app.destroyed, 'save/exit')
             manager.thread.join(1)
-            assert not manager.thread.is_alive()
-            calls_before_restore = len(ProductClient.calls)
-        assert state['step'] == 'done'
-        # Exercise the real command-line entry point with an isolated data directory.
-        import runpy
+            calls = len(SyntheticClient.calls)
+            root, manager, app = create()
+            wait(lambda: app.initialized, 'restore')
+            assert [j['id'] for j in app.snapshot['jobs']] == original
+            assert len(SyntheticClient.calls) == calls and not app.snapshot['running']
+            assert any(j['status'] == 'excluded' for j in app.snapshot['jobs'])
+            assert app.snapshot['preferences']['favorites'][0]['name'] == 'Movies'
+            assert not list(base.glob('restore2/*.part'))
+            app.start_button.invoke()
+            wait(lambda: not app.snapshot['running'] and not any(j['status'] in {'pending', 'downloading'} for j in app.snapshot['jobs']), 'restored queue')
+            assert all(Path(j['path']).read_bytes() == BODY for j in app.snapshot['jobs'] if j['status'] == 'completed')
+            app.close()
+            wait(lambda: manager.closed.is_set() and app.destroyed, 'restored exit')
+        finally:
+            for owned_root, owned_manager, owned_app in owned:
+                if not owned_manager.closed.is_set():
+                    owned_manager.post('close')
+                assert owned_manager.closed.wait(3), 'Owned coordinator did not close'
+                owned_manager.thread.join(1)
+                try:
+                    owned_app.destroy()
+                except tk.TclError:
+                    pass
+
         real_tk, original_app = tk.Tk, TeraApp
-        startup = {'app': None, 'passed': False}
+        startup = {}
         def owned_root():
             root = real_tk()
             root.withdraw()
@@ -267,31 +254,24 @@ def main():
         def startup_app(root, manager):
             app = original_app(root, manager, available_profiles=[])
             startup['app'] = app
-            expires = time.monotonic() + 5
+            deadline = time.monotonic() + 5
             def check():
-                if app.initialized:
-                    assert not app.snapshot['running'] and not app.snapshot['jobs']
-                    startup['passed'] = True
-                    app.close()
-                elif time.monotonic() >= expires:
-                    errors.append('Isolated CLI startup did not initialize')
+                if app.initialized or time.monotonic() >= deadline:
+                    startup['passed'] = app.initialized and not app.snapshot['jobs']
                     app.close()
                 else:
                     root.after(20, check)
             root.after(20, check)
             return app
         with patch('sys.argv', ['terabox.py', '--data-dir', str(base / 'cli-state')]), \
-             patch('tkinter.Tk', side_effect=owned_root), \
-             patch('tera_gui.TeraApp', side_effect=startup_app), \
-             patch('tera_gui.profiles', side_effect=AssertionError('Unexpected real profile read')), \
-             patch('urllib.request.OpenerDirector.open', side_effect=AssertionError('Unexpected network')):
+             patch('tkinter.Tk', side_effect=owned_root), patch('tera_gui.TeraApp', side_effect=startup_app):
             runpy.run_path(str(Path(__file__).parent / 'terabox.py'), run_name='__main__')
-        assert startup['passed'] and not errors, errors
+        assert startup['passed']
         startup['app'].manager.thread.join(1)
         assert startup['app'].manager.closed.is_set()
-        print('PASS: native Tkinter login isolation, favorites, queue edits, pause/rapid toggles, exact files, history/retry, reveal stub, save/exit and held restore')
-        print('PASS: real command-line entry point, isolated data directory and native Tk startup/exit without profile or network access')
-        print('PASS: injected protection failure keeps pasted links and starts no network work; explicit recovery succeeds')
+        print('PASS: native review/checkbox selection, duplicate inputs/aliases, exclusions, per-share folders, rename/folder conflict correction')
+        print('PASS: favorites, login isolation, failed-save recovery, queue append/edit, pause/rapid toggles, finish-current pause, cancel/reset')
+        print('PASS: byte-exact files, history/retry/clear, reveal stub, save/exit, held restore, isolated real CLI startup/exit')
 
 
 if __name__ == '__main__':

@@ -6,25 +6,54 @@
 2. Select your usual **Firefox profile**. Use **Login in Firefox** to open your
    share and sign into TeraBox in a normal tab; **Check login** verifies it.
 3. Paste share links one per line or separated by commas, choose a destination,
-   then click **Add to queue**. Invalid links are reported inline. Your last
+   then click **Review links**. Invalid links are reported inline. Your last
    destination is remembered; **Save favorite…** names folders you use often.
-4. Click **Start queue**. Each share is discovered in order and all its supported
-   videos are queued. Add more links while a transfer runs; select pending rows
-   to **Move up**, **Move down**, or **Remove pending**. **Skip current** removes
-   only that attempt's temporary file and continues to the next item.
-5. **Pause** holds the active transfer and queue. **Pausing…** waits for an
+   Optionally enable **Use a separate folder for each share** before reviewing.
+4. In **Review**, click a video's checkbox (or select it and press Space) to
+   include/exclude it. The view shows file sizes, destinations and selected bytes.
+   **Download selected** starts those files, or appends them to the running queue.
+   It preserves an existing pause. Review and exclusions survive reopening;
+   **Review saved shares** explicitly discovers an interrupted review.
+5. Review more links while downloading. In **Queue**, select pending rows to
+   **Move up**, **Move down**, or **Remove pending**. **Change folder…** and
+   **Rename…** work on reviewed, pending or held files. **Skip** stops the active
+   file, or skips a selected held file when no transfer is active. It removes
+   only that attempt's owned temporary file and preserves completed files.
+6. **Pause now** holds the active transfer and queue. **Pausing…** waits for an
    in-flight read; **Paused** confirms the worker has stopped reading. Click
-   **Resume** to continue while Tera remains open. The dashboard shows overall
-   known progress, speed and estimated time; undiscovered sizes are marked.
-6. The **History** tab shows completed, failed, skipped and cancelled items.
+   **Resume** to continue while Tera remains open. **Finish current, then pause**
+   lets the active file finish and starts no next file until Resume. The dashboard
+   shows overall known progress, speed and estimated time.
+7. The **History** tab shows completed, failed, skipped and cancelled items.
    Select failures and click **Retry selected failures**, then **Start queue**.
+   A failed share review returns to **Review saved shares** instead of downloading
+   unreviewed files. To restart a cancelled/skipped file, review its share again.
    **Reveal folder** opens a saved destination only when clicked. **Clear history**
-   is available while idle and never deletes files or unfinished jobs.
-7. Clicking **X saves the queue and exits** after the current request stops.
+   is available while idle, forgets completion duplicate markers, and never deletes
+   files or unfinished jobs.
+8. Clicking **X saves the queue and exits** after the current request stops.
    Reopening restores unfinished jobs and destinations without automatically
    checking login or starting downloads. **Interrupted files restart from zero
    in this version.** Cancel queue marks pending items cancelled; completed files
    are always kept. Tray mode and schedules are not implemented yet.
+
+Repeated normalized inputs are discovered once while already in Review/Queue.
+Aliases are considered duplicates only when the provider reports matching share
+and file IDs and expected size. Without an authoritative share ID, detection stays
+within the same normalized input. A **Prior download** is unselected only when its
+recorded file still matches its size and modification time; this is not a content
+hash or an integrity guarantee. Missing/changed files can be selected again.
+
+Tera checks writable destinations and remaining known bytes on the same disk
+before a file starts, then repeats the checks between files. A collision or disk
+failure holds the queue with **Needs attention**. Select the row and use
+**Rename…**, **Change folder…**, or **Skip**, then **Resume**. Existing files and
+unrelated `.part` files are never adopted or overwritten. Free-space checks do
+not reserve disk space against other apps. A mid-file storage failure cleans up
+the owned partial and restarts that file from zero after correction. Stop an
+active file before reviewing/restarting it at a new destination; partial files
+are not moved. Per-share folder names use a short identity hash, not a raw share
+code or password.
 
 TeraBox aliases from `terasharelink.com`, `terasharefile.com`, and
 `terafileshare.com` are accepted in both `/s/1…` and `sharing/link?surl=…`
@@ -86,12 +115,15 @@ files restart from zero when started again. Rate
 limits, expired links, account limits, share restrictions and future TeraBox
 changes can still cause failures.
 
-Delivery A verification passed **47 offline tests** and an isolated, withdrawn
+Deliveries A/B verification passed **65 offline tests** and an isolated, withdrawn
 native Tkinter smoke check on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. The checks
 covered encrypted storage, failed saves, backup/restore, process locking, queue
-edits, active-stream skip cleanup, history/retry, favorites, pause/rapid toggles,
-byte-exact synthetic files, save/exit, held restoration and real isolated CLI
-startup/exit. No real Firefox session or TeraBox download was used for this update.
+edits, active-stream skip cleanup, history/retry, favorites, review/selection,
+duplicates/exclusions, disk/conflict handling, pause/rapid toggles, finish-current
+pause, byte-exact synthetic files, save/exit, held restoration and real isolated
+CLI startup/exit. The native check uses mocked login, provider and shell access;
+space exhaustion and write failures use deterministic offline fixtures. No real
+Firefox session or TeraBox download was used for this update.
 **Evidence: 2/3 — Local queue/UI behavior is directly tested; live-provider
 compatibility and full large-file transfer remain unverified.**
 
@@ -114,6 +146,7 @@ Diagnostics do not print cookie values, account identifiers or signed download U
 
 The [incorporation plan](tasks/plan.md) combines the requested heavy-download and
 personal-workflow improvements. Its [implementation checklist](tasks/todo.md)
-records Delivery A's local verification. Review/selection, duplicate/storage
-preflight, finish-current pause, durable partial resume, automatic retries,
-bandwidth/schedule/budget controls and tray/notifications remain pending.
+records completed deliveries and their local verification. Review/selection, duplicate/storage
+preflight and finish-current pause are now implemented in Delivery B. Durable
+partial resume, automatic retries, bandwidth/schedule/budget controls and
+tray/notifications remain pending in Deliveries C-E.

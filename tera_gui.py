@@ -11,7 +11,7 @@ from tkinter import filedialog, simpledialog, ttk
 
 from app_state import default_data_dir
 from firefox_session import SessionError, profiles
-from queue_manager import QueueManager, TERMINAL
+from queue_manager import QueueManager, TERMINAL, REVIEW
 from terabox import DownloadError, TeraBox, open_firefox, parse_links
 
 
@@ -37,6 +37,7 @@ class TeraApp:
         self._last_rows = {}
         self.initialized = False
         self.closing = False
+        self.destroyed = False
         self.close_error = False
         self.login_busy = False
         self.pending_add = None
@@ -86,8 +87,10 @@ class TeraApp:
         self.destination_entry.pack(side='left', fill='x', expand=True)
         self.browse_button = ttk.Button(folder_row, text='Save to…', command=self.browse)
         self.browse_button.pack(side='left', padx=6)
-        self.add_button = ttk.Button(folder_row, text='Add to queue', command=self.add_links)
+        self.add_button = ttk.Button(folder_row, text='Review links', command=self.add_links)
         self.add_button.pack(side='left')
+        self.per_share = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text='Use a separate folder for each share', variable=self.per_share).pack(anchor='w')
         favorite_row = ttk.Frame(frame)
         favorite_row.pack(fill='x', pady=(5, 9))
         ttk.Label(favorite_row, text='Favorite folders').pack(side='left')
@@ -99,11 +102,29 @@ class TeraApp:
         self.favorite_button.pack(side='left')
         self.forget_favorite_button = ttk.Button(favorite_row, text='Remove favorite', command=self.remove_favorite)
         self.forget_favorite_button.pack(side='left', padx=6)
-        notebook = ttk.Notebook(frame)
+        notebook = self.notebook = ttk.Notebook(frame)
         notebook.pack(fill='both', expand=True)
+        self.review_page = ttk.Frame(notebook)
+        notebook.add(self.review_page, text='Review')
         queue_page, history_page = ttk.Frame(notebook), ttk.Frame(notebook)
         notebook.add(queue_page, text='Queue')
         notebook.add(history_page, text='History')
+        self.review_tree = self._tree(self.review_page, ('chosen', 'name', 'size', 'folder', 'detail'),
+                                      ('Download', 'Video', 'Size', 'Destination', 'Review / duplicate check'))
+        self.review_tree.column('chosen', width=85, stretch=False)
+        self.review_tree.bind('<ButtonRelease-1>', self.toggle_review)
+        self.review_tree.bind('<space>', self.toggle_review)
+        self.review_summary = tk.StringVar(value='Review links to choose videos before downloading.')
+        ttk.Label(self.review_page, textvariable=self.review_summary, wraplength=930).pack(anchor='w', pady=4)
+        review_actions = ttk.Frame(self.review_page)
+        review_actions.pack(fill='x')
+        self.download_button = ttk.Button(review_actions, text='Download selected', command=self.download_selected)
+        self.download_button.pack(side='left')
+        self.review_saved_button = ttk.Button(review_actions, text='Review saved shares', command=lambda: self.send('review_saved'))
+        self.review_saved_button.pack(side='left', padx=6)
+        ttk.Button(review_actions, text='Change folder…', command=lambda: self.change_destination(self.review_tree)).pack(side='left')
+        ttk.Button(review_actions, text='Rename…', command=lambda: self.rename_selected(self.review_tree)).pack(side='left', padx=6)
+        ttk.Button(review_actions, text='Remove', command=lambda: self.remove_selected(self.review_tree)).pack(side='left')
         self.queue_tree = self._tree(queue_page, ('name', 'status', 'size', 'progress', 'source', 'folder'),
                                      ('Video / share', 'Status', 'Size', 'Progress', 'Login source', 'Destination'))
         edit = ttk.Frame(queue_page)
@@ -113,6 +134,8 @@ class TeraApp:
         self.remove_button = ttk.Button(edit, text='Remove pending', command=self.remove_pending)
         for button in (self.up_button, self.down_button, self.remove_button):
             button.pack(side='left', padx=(0, 6))
+        ttk.Button(edit, text='Change folder…', command=lambda: self.change_destination(self.queue_tree)).pack(side='left')
+        ttk.Button(edit, text='Rename…', command=lambda: self.rename_selected(self.queue_tree)).pack(side='left', padx=6)
         self.history_filter = tk.StringVar(value='All')
         filter_row = ttk.Frame(history_page)
         filter_row.pack(fill='x', pady=5)
@@ -138,15 +161,16 @@ class TeraApp:
         actions = ttk.Frame(frame)
         actions.pack(fill='x')
         self.start_button = ttk.Button(actions, text='Start queue', command=lambda: self.send('start'))
-        self.pause_button = ttk.Button(actions, text='Pause', command=self.pause_now)
-        self.skip_button = ttk.Button(actions, text='Skip current', command=lambda: self.send('skip'))
+        self.pause_button = ttk.Button(actions, text='Pause now', command=self.pause_now)
+        self.boundary_button = ttk.Button(actions, text='Finish current, then pause', command=lambda: self.send('pause_after'))
+        self.skip_button = ttk.Button(actions, text='Skip', command=self.skip_selected)
         self.cancel_button = ttk.Button(actions, text='Cancel queue', command=lambda: self.send('cancel'))
-        for button in (self.start_button, self.pause_button, self.skip_button, self.cancel_button):
+        for button in (self.start_button, self.pause_button, self.boundary_button, self.skip_button, self.cancel_button):
             button.pack(side='left', padx=(0, 6))
         ttk.Label(frame, text='Closing saves pending jobs. Interrupted files restart from zero in this version.', foreground='#555555').pack(anchor='w', pady=(8, 0))
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.configure_controls()
-        root.after(50, self.poll)
+        self.poll_id = root.after(50, self.poll)
 
     def _tree(self, parent, columns, headings):
         area = ttk.Frame(parent)
@@ -225,8 +249,9 @@ class TeraApp:
             links = parse_links(text)
             if not self.destination.get().strip():
                 raise DownloadError('Choose a destination folder first.')
-            self.send('add', links=links, folder=self.destination.get().strip(), profile=self.profile_options.get(self.source.get()))
+            self.send('review', links=links, folder=self.destination.get().strip(), profile=self.profile_options.get(self.source.get()), per_share=self.per_share.get())
             self.pending_add = text
+            self.notebook.select(self.review_page)
             self.configure_controls()
         except DownloadError as error:
             self.status.set(str(error).split('\n')[0])
@@ -259,6 +284,50 @@ class TeraApp:
     def selected_queue_job(self):
         selection = self.queue_tree.selection()
         return selection[0] if selection else None
+
+    def toggle_review(self, event):
+        if event.keysym == 'space':
+            selected = self.review_tree.selection()
+            identifier = selected[0] if selected else None
+        else:
+            identifier = self.review_tree.identify_row(event.y) if self.review_tree.identify_column(event.x) == '#1' else None
+        if identifier:
+            self.send('review_choice', job_id=identifier)
+        return 'break' if event.keysym == 'space' else None
+
+    def download_selected(self):
+        if self.snapshot:
+            self.send('select', job_ids=[j['id'] for j in self.snapshot['jobs'] if j['status'] == 'review'])
+
+    def change_destination(self, tree):
+        for identifier in tree.selection():
+            job = next(j for j in self.snapshot['jobs'] if j['id'] == identifier)
+            if job['status'] not in {'pending', 'attention', 'review', 'excluded'}:
+                self.status.set('Stop the active file before changing its destination; it must restart from zero.')
+                return
+            folder = filedialog.askdirectory(parent=self.root, initialdir=job['folder'], title='New destination for selected file')
+            if folder:
+                self.send('destination', job_id=identifier, folder=folder)
+            break
+
+    def rename_selected(self, tree):
+        selection = tree.selection()
+        if selection:
+            job = next(j for j in self.snapshot['jobs'] if j['id'] == selection[0])
+            if job['status'] not in {'pending', 'attention', 'review', 'excluded'} or not job['video']:
+                self.status.set('Select a reviewed, pending, or held file to rename.')
+                return
+            name = simpledialog.askstring('Save with another name', 'File name (include extension):', parent=self.root,
+                                          initialvalue=job['output_name'] or job['video']['name'])
+            if name is not None:
+                self.send('destination', job_id=job['id'], name=name)
+
+    def remove_selected(self, tree):
+        for identifier in tree.selection():
+            self.send('remove', job_id=identifier)
+
+    def skip_selected(self):
+        self.send('skip', job_id=self.selected_queue_job())
 
     def move(self, direction):
         identifier = self.selected_queue_job()
@@ -295,6 +364,7 @@ class TeraApp:
         snapshot = self.snapshot or {}
         available = self.initialized and not self.closing and not self.manager.closed.is_set()
         working = snapshot.get('running') or snapshot.get('active')
+        discovering = snapshot.get('review_busy')
         def enabled(widget, value):
             widget.configure(state='normal' if value else 'disabled')
         for widget in (self.add_button, self.favorite_button, self.forget_favorite_button, self.browse_button, self.destination_entry):
@@ -302,19 +372,23 @@ class TeraApp:
         enabled(self.add_button, available and self.pending_add is None)
         self.favorite_box.configure(state='readonly' if available else 'disabled')
         self.links_box.configure(state='normal' if available else 'disabled')
-        self.source_box.configure(state='readonly' if available and not working and not self.login_busy else 'disabled')
+        self.source_box.configure(state='readonly' if available and not working and not discovering and not self.login_busy else 'disabled')
         for widget in (self.login_button, self.check_button, self.disconnect_button):
-            enabled(widget, available and not working and not self.login_busy)
-        pending = any(j['status'] == 'pending' for j in snapshot.get('jobs', []))
+            enabled(widget, available and not working and not discovering and not self.login_busy)
+        pending = any(j['status'] in {'pending', 'attention'} for j in snapshot.get('jobs', []))
         self.start_button.configure(text='Resume' if snapshot.get('paused') else 'Start queue')
         enabled(self.start_button, available and not self.login_busy and not snapshot.get('stopping') and (snapshot.get('paused') or not working and pending))
         enabled(self.pause_button, available and bool(working) and not snapshot.get('paused'))
-        enabled(self.skip_button, available and bool(snapshot.get('active')))
-        enabled(self.cancel_button, available and bool(working))
+        enabled(self.boundary_button, available and bool(working) and not snapshot.get('paused') and not snapshot.get('pause_after'))
+        enabled(self.skip_button, available and (bool(snapshot.get('active')) or any(j['status'] == 'attention' for j in snapshot.get('jobs', []))))
+        enabled(self.cancel_button, available and bool(working or discovering))
+        enabled(self.download_button, available and not self.login_busy and any(j['status'] == 'review' for j in snapshot.get('jobs', [])))
+        enabled(self.review_saved_button, available and not discovering and any(j['status'] == 'unreviewed' for j in snapshot.get('jobs', [])))
         jobs = {j['id']: j for j in snapshot.get('jobs', [])}
         selected = jobs.get(self.selected_queue_job(), {})
         for widget in (self.up_button, self.down_button, self.remove_button):
             enabled(widget, available and selected.get('status') == 'pending')
+        enabled(self.remove_button, available and selected.get('status') in {'pending', 'attention'})
         history_selection = [jobs[i] for i in self.history_tree.selection() if i in jobs]
         enabled(self.retry_button, available and any(j['status'] == 'failed' and not j['source_blocked'] for j in history_selection))
         enabled(self.reveal_button, available and any(j['status'] == 'completed' for j in history_selection))
@@ -326,22 +400,26 @@ class TeraApp:
         jobs = self.snapshot['jobs']
         rows = []
         history = []
+        review = []
         for job in jobs:
             video = job['video']
-            name = video['name'] if video else 'Share awaiting discovery'
-            if job['status'] in TERMINAL:
+            name = job['output_name'] or (video['name'] if video else 'Share awaiting discovery')
+            if job['status'] in REVIEW:
+                review.append((job['id'], ('☑' if job['status'] == 'review' else '☐', name, size_text(video['size']) if video else 'Unknown',
+                                           job['folder'], job['error'] or job['status'].capitalize())))
+            elif job['status'] in TERMINAL:
                 if self.history_filter.get() != 'All' and job['status'] != self.history_filter.get().lower():
                     continue
                 finished = time.strftime('%d %b %H:%M', time.localtime(job['finished'])) if job['finished'] else ''
                 history.append((job['id'], (name, job['status'].capitalize(), finished, job['error'] or job['path'])))
             else:
                 percent = f"{job['received'] / video['size']:.0%}" if video and video['size'] else '—'
-                status = job['status'].capitalize()
+                status = 'Needs attention' if job['status'] == 'attention' else job['status'].capitalize()
                 if self.snapshot['paused'] and job['id'] == self.snapshot['active']:
                     status = 'Paused' if self.snapshot['pause_acknowledged'] else 'Pausing…'
                 source = job['profile']['name'] if job['profile'] else 'No login'
                 rows.append((job['id'], (name, status, size_text(video['size']) if video else 'Unknown', percent, source, job['folder'])))
-        for tree, items in ((self.queue_tree, rows), (self.history_tree, history)):
+        for tree, items in ((self.review_tree, review), (self.queue_tree, rows), (self.history_tree, history)):
             if self._last_rows.get(tree) == items:
                 continue
             wanted = {identifier for identifier, values in items}
@@ -355,6 +433,12 @@ class TeraApp:
                 else:
                     tree.insert('', index, iid=identifier, values=values)
             self._last_rows[tree] = items
+        chosen = [j for j in jobs if j['status'] == 'review' and j['video']]
+        folders = {j['folder'] for j in chosen}
+        free = self.snapshot['review_space'].get(next(iter(folders))) if len(folders) == 1 else None
+        self.review_summary.set(f"{len(chosen)} selected · {size_text(sum(j['video']['size'] for j in chosen))}" +
+                                (f' · Free here: {size_text(free)}' if free is not None else '') +
+                                ' · Destinations and space are checked again before downloading.')
         total, received = self.snapshot['total'], self.snapshot['received']
         self.progress['value'] = min(100, received / total * 100) if total else 0
         suffix = ' · more sizes pending discovery' if self.snapshot['unknown'] else ''
@@ -405,16 +489,22 @@ class TeraApp:
                 self.configure_controls()
         if self.closing and self.manager.closed.is_set() and not (self.login_thread and self.login_thread.is_alive()):
             if not self.close_error:
-                self.root.destroy()
+                self.destroy()
                 return
             self.status.set('The latest changes could not be saved. Previous saved data was kept. Close again to exit.')
         if self.manager.closed.is_set():
             self.configure_controls()
-        self.root.after(50, self.poll)
+        self.poll_id = self.root.after(50, self.poll)
+
+    def destroy(self):
+        if not self.destroyed:
+            self.destroyed = True
+            self.root.after_cancel(self.poll_id)
+            self.root.destroy()
 
     def close(self):
         if self.manager.closed.is_set() and not (self.login_thread and self.login_thread.is_alive()):
-            self.root.destroy()
+            self.destroy()
             return
         self.closing = True
         self.login_cancel.set()

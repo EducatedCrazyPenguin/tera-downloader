@@ -1,8 +1,10 @@
 # Tera roadmap implementation checklist
 
-Status: Delivery A implemented locally on 19 October 2026. T01-T06 and checkpoints A1/A2 passed the checks recorded below. Deliveries B-E remain pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
+Status: Deliveries A/B implemented locally on 19 October 2026. T01-T09 and checkpoints A1/A2/B passed the checks recorded below. Deliveries C-E remain pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
 
-**Evidence: Delivery A 3/3 — 47 offline tests and the isolated native Tkinter/real-entry-point smoke check passed on Python 3.12.10, Tk 8.6, and SQLite 3.49.1. Whole-roadmap evidence remains 2/3; Deliveries B-E and live provider resume are unverified.**
+**Evidence at the Delivery A checkpoint: 3/3 for that local scope — 47 offline tests and the isolated native Tkinter/real-entry-point smoke check passed on Python 3.12.10, Tk 8.6, and SQLite 3.49.1. B-E were then pending.**
+
+**Evidence: Delivery B 3/3 for the tested local/synthetic scope — 65 offline tests and the integrated withdrawn native smoke passed in the same environment. Whole-roadmap evidence remains 2/3; Deliveries C-E, real provider transfers, and long-pause reliability remain unverified.**
 
 ## Delivery A — Queue, persistence, and everyday use
 
@@ -48,25 +50,25 @@ Status: Delivery A implemented locally on 19 October 2026. T01-T06 and checkpoin
 
 ## Delivery B — Review, storage, and boundary pause
 
-- [ ] T07 — Add the review/selection step and duplicate detection.
+- [x] T07 — Add the review/selection step and duplicate detection.
   - Acceptance: list selected videos and aggregate known sizes; append selected jobs during a run; recognize exact repeated inputs and authoritative provider identities.
   - Verify: metadata-fake tests for aliases, repeats, changed entries, exclusions, and late discovery; native review-to-queue flow.
   - Likely files: `review_storage.py`, `test_review_storage.py`, `queue_manager.py`, `terabox.py`, `smoke_terabox_gui.py`.
   - Dependencies: T02/T04/T05. Scope: medium.
 
-- [ ] T08 — Add destination/storage preflight and safe conflict actions.
+- [x] T08 — Add destination/storage preflight and safe conflict actions.
   - Acceptance: writable destination/free-space checks before starting and between files; per-share folders; skip/rename/choose-folder actions never overwrite or adopt unrelated partials.
   - Verify: temporary-disk fixtures for space exhaustion, collisions, missing prior downloads, safe names, and changed destinations; no real directory scans.
   - Likely files: `review_storage.py`, `test_review_storage.py`, `terabox.py`, `test_terabox.py`, `smoke_terabox_gui.py`.
   - Dependencies: T03/T07. Scope: medium.
 
-- [ ] T09 — Add finish-current-file pause and distinct stop reasons.
+- [x] T09 — Add finish-current-file pause and distinct stop reasons.
   - Acceptance: Pause now remains responsive; boundary pause waits for the current file and starts no next file; manual Resume is required; cancel/skip remain distinct.
   - Verify: tests at idle, discovery, mid-read, finalization, and between jobs; repeated toggles in the native smoke.
   - Likely files: `run_policy.py`, `test_run_policy.py`, `queue_manager.py`, `terabox.py`, `smoke_terabox_gui.py`.
   - Dependencies: T04/T07. Scope: medium.
 
-- [ ] Checkpoint B — Review, selection, duplicate/conflict handling, disk failure, Pause now, and finish-current pause work without changing authentication or no-overwrite boundaries.
+- [x] Checkpoint B — Review, selection, duplicate/conflict handling, disk failure, Pause now, and finish-current pause work without changing authentication or no-overwrite boundaries.
 
 ## Delivery C — Recovery without corrupting files
 
@@ -136,4 +138,13 @@ No automatic task below authorizes real Firefox cookie checks, live downloads, v
 
 - 47 offline tests cover DPAPI round trips, ciphertext on disk, failed writes, database backup/restore, corrupt/newer state, a separate hidden-process lock check, queue edits and stale events, active-stream skip cleanup, selective retries, held restart, and Disconnect without anonymous fallback.
 - `python smoke_terabox_gui.py` uses withdrawn task-owned windows and synthetic streams: verified login isolation, favorites, add/move/remove, pause/rapid toggles, byte-exact saved files, history/retry/clear, a stubbed Reveal folder action, save/exit, and restoration without network work. Its final stage exercises the real `terabox.py --data-dir` entry point and native startup/exit.
-- Current phase limitation: saved queue jobs restart interrupted files from zero. Byte checkpoints, selection/review, per-share folders, budgets/schedules, tray and notifications remain unchecked below.
+- At the A checkpoint, saved queue jobs restarted interrupted files from zero; review/storage, byte checkpoints, budgets/schedules, tray and notifications were still pending. The B record below supersedes the review/storage status.
+
+## Delivery B verification record — 19 October 2026
+
+- `review_storage.py` adds hashed normalized input keys, authoritative provider identities with conservative source fallback, private safe per-share folder names, recorded size/mtime receipt checks, destination write probes, collision checks and shared-disk byte totals. No dependency or database schema migration was added.
+- `queue_manager.py` persists reviews and exclusions in the existing protected job store. One separate metadata worker can review additional shares during a transfer; restoration starts neither discovery nor downloads. Explicit selections queue only reviewed files and preserve manual holds. Late discovery results, cancellation/re-review, changed metadata and failed protection are covered.
+- Storage failures hold the affected item. Rename/folder correction and Skip preserve foreign final/partial files. Active destinations cannot be changed; the user stops and reviews/restarts them explicitly. Finish-current pause is distinct from Pause now, Skip and Cancel, including discovery and finalization boundaries.
+- All 65 offline tests passed with temporary directories rooted in the workspace on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Inverting the free-space guard made its focused regression fail; the original source was restored afterward.
+- The withdrawn native Tkinter smoke verified checkbox selection and totals, exact input/alias duplicates, persistent exclusions, per-share destinations, rename and folder conflict correction, append/reorder/remove, favorites, mocked login, failed-save recovery, rapid pause/resume, finish-current hold, Cancel/control reset, byte-exact files, history/retry/clear, a stubbed Reveal action, save/exit, held restore and isolated real CLI startup/exit. Owned instances exit cleanly without pending Tk callbacks.
+- No real Firefox profile, provider traffic, shell window, installation or live download was used. Disk exhaustion/write failure uses offline injection; no real disk was filled. Source/native behavior is checked; provider resume, large files, installed packaging and Deliveries C-E remain pending. Interrupted files still restart from zero.

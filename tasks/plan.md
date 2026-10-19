@@ -154,3 +154,13 @@ Closing now saves pending jobs and exits after the owned transfer stops; interru
 **Delivery A evidence: 3/3 — 47 offline tests passed; the withdrawn native Tkinter smoke verified the integrated flow, exact synthetic files, save/exit and restart, and the real isolated CLI entry point on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. No live Firefox login or TeraBox download was used.**
 
 The initial UI still adds share links directly and discovers files when started. Review/selection and per-share folders belong to Delivery B; durable partial bytes, provider resume, and recovery policies belong to C. Rate/schedule/budget controls and tray/notification integration remain in D/E. The complete roadmap is not yet implemented.
+
+## Delivery B implementation record — 19 October 2026
+
+The UI now reviews submitted shares before Download selected, with persistent checkbox exclusions, known size totals and destinations. The existing coordinator owns those records and at most one additional metadata worker; clients and login sources remain isolated from the active transfer. Exact normalized sources and authoritative share/file/size identities prevent duplicate work. Prior-download receipts require a matching existing size and modification time, without claiming cryptographic verification.
+
+`review_storage.py` supplies shared helpers for identity, hashed per-share folders, writable destination/free-space preflight and existing target/partial protection. Remaining selected bytes on the same filesystem are counted before each file. Storage conflicts/failures hold the queue for explicit Rename, Change folder, Skip or Resume. Active destinations are immutable until stopped and explicitly restarted. Finish current, then pause completes the active file and requires Resume before starting another; Pause now retains its original cancellable stream hold.
+
+The earlier Delivery A workflow description above records that delivery's initial state. Review and storage are now implemented, not pending. No schema migration, transport dependency, signed URL persistence or byte-level recovery was added. C-E remain pending.
+
+**Delivery B evidence: 3/3 for the checked local scope — 65 offline tests and the integrated withdrawn native Tkinter/isolated real-entry-point smoke passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. This includes synthetic exact files, saved review/exclusions, duplicate handling, storage correction, boundary pause, Cancel/reset and clean save/restore. Whole-product evidence remains 2/3: no live authentication/download, large-file, provider resume or installed-package check was run.**
