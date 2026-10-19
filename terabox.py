@@ -5,7 +5,6 @@ import argparse
 import http.cookiejar
 import json
 import os
-import queue
 import re
 import subprocess
 import threading
@@ -418,264 +417,20 @@ def open_firefox(profile, link):
     subprocess.Popen(args + ['-new-tab', link])
 
 
-def gui():
-    import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
-    root = tk.Tk()
-    root.title('Tera — Firefox session downloader')
-    root.geometry('860x650')
-    root.minsize(760, 620)
-    root.configure(bg='#f3f5f9')
-    style = ttk.Style(root)
-    style.theme_use('clam')
-    style.configure('TFrame', background='#f3f5f9')
-    style.configure('TLabel', background='#f3f5f9', font=('Segoe UI', 10))
-    style.configure('TButton', font=('Segoe UI', 10), padding=9)
-    style.configure('Title.TLabel', font=('Segoe UI', 25, 'bold'))
-    frame = ttk.Frame(root, padding=25)
-    frame.pack(fill='both', expand=True)
-    ttk.Label(frame, text='Tera', style='Title.TLabel').pack(anchor='w')
-    ttk.Label(frame, text='Download public TeraBox videos directly to your computer.').pack(anchor='w', pady=(4, 18))
-    ttk.Label(frame, text='Paste links one per line or separated by commas. Every video downloads in order.').pack(anchor='w')
-    links_box = tk.Text(frame, height=4, font=('Segoe UI', 11), wrap='word')
-    links_box.pack(fill='x', pady=(4, 0))
-    links_box.focus()
-    settings = load_settings()
-    try:
-        available_profiles = profiles()
-    except SessionError:
-        available_profiles = []
-    profile_options = {'No login': None}
-    for profile in available_profiles:
-        profile_options[f'Firefox: {profile.name} ({profile.path.name})'] = profile
-    configured = settings.get('firefox_profile', '')
-    default_label = next((label for label, profile in profile_options.items()
-                          if profile and str(profile.path) == configured),
-                         next((label for label, profile in profile_options.items() if profile), 'No login'))
-    if configured is None:
-        default_label = 'No login'
-    source = tk.StringVar(value=default_label)
-    login_status = tk.StringVar(value='Sign into TeraBox in Firefox once, then use Check login.')
-    session_row = ttk.Frame(frame)
-    session_row.pack(fill='x', pady=(12, 0))
-    source_box = ttk.Combobox(session_row, textvariable=source, values=list(profile_options), state='readonly', width=42)
-    source_box.pack(side='left', fill='x', expand=True)
-    def launch_firefox():
-        try:
-            first_link = next((value.strip() for value in links_box.get('1.0', 'end').splitlines() if value.strip()), '')
-            open_firefox(profile_options.get(source.get()), first_link)
-        except DownloadError as error:
-            messagebox.showerror('Open Firefox', str(error), parent=root)
-    firefox_button = ttk.Button(session_row, text='Login in Firefox', command=launch_firefox)
-    firefox_button.pack(side='left', padx=(8, 0))
-    ttk.Label(frame, textvariable=login_status, wraplength=790).pack(anchor='w', pady=(5, 0))
-    destination = tk.StringVar(value=str(Path(__file__).parent / 'downloads'))
-    folder_row = ttk.Frame(frame)
-    folder_row.pack(fill='x', pady=10)
-    destination_entry = ttk.Entry(folder_row, textvariable=destination)
-    destination_entry.pack(side='left', fill='x', expand=True)
-    def browse():
-        selected = filedialog.askdirectory(parent=root, title='Save videos to')
-        if selected:
-            destination.set(selected)
-    browse_button = ttk.Button(folder_row, text='Save to…', command=browse)
-    browse_button.pack(side='right', padx=(8, 0))
-    files = tk.Listbox(frame, height=5, font=('Segoe UI', 10), activestyle='none', exportselection=False)
-    files.pack(fill='both', expand=True)
-    status = tk.StringVar(value='Paste one or more share links, then click Download queue.')
-    ttk.Label(frame, textvariable=status, wraplength=750).pack(anchor='w', pady=(12, 7))
-    progress = ttk.Progressbar(frame, maximum=100)
-    progress.pack(fill='x')
-    actions = ttk.Frame(frame)
-    actions.pack(fill='x', pady=10)
-    ttk.Label(frame, text='Firefox keeps your login • TeraBox cookies only • Direct downloads', foreground='#496278').pack(anchor='w')
-    ttk.Label(frame, text='Use a normal Firefox tab. In-app browser login cannot be imported here.', foreground='#6b7280').pack(anchor='w', pady=(4, 0))
-    events = queue.Queue()
-    stop = threading.Event()
-    pause = threading.Event()
-    state = {'busy': False, 'downloading': False, 'queue': [], 'closing': False}
-
-    def source_changed(event=None):
-        try:
-            save_settings(profile_options.get(source.get()))
-        except OSError:
-            login_status.set('The profile choice could not be saved. You can still use it this time.')
-        else:
-            login_status.set('No login selected.' if source.get() == 'No login' else 'Firefox selected. Click Check login to verify.')
-    source_box.bind('<<ComboboxSelected>>', source_changed)
-
-    def busy(value):
-        state['busy'] = value
-        pause.clear()
-        if not value:
-            state['downloading'] = False
-        pause_button.configure(text='Pause', state='normal' if state['downloading'] else 'disabled')
-        normal = 'disabled' if value else 'normal'
-        for widget in (button, browse_button, check_button, forget_button, firefox_button, links_box, destination_entry):
-            widget.configure(state=normal)
-        source_box.configure(state='disabled' if value else 'readonly')
-        cancel_button.configure(state='normal' if value else 'disabled')
-
-    def check_login():
-        if state['busy']:
-            return
-        profile = profile_options.get(source.get())
-        if not profile:
-            login_status.set('Select your Firefox profile first.')
-            return
-        stop.clear()
-        busy(True)
-        def work():
-            try:
-                client = TeraBox(stop, emit_status, profile)
-                client.verify_login()
-                save_settings(profile)
-                events.put(('login', 'Firefox login verified. Paste links and click Download queue.'))
-            except (DownloadError, OSError) as error:
-                events.put(('login', str(error) if isinstance(error, DownloadError) else 'Could not save your profile preference.'))
-            finally:
-                events.put(('idle', None))
-        threading.Thread(target=work, daemon=True).start()
-
-    def forget():
-        source.set('No login')
-        source_changed()
-        login_status.set('Disconnected from Firefox. Your Firefox login is unchanged.')
-
-    def emit_status(value):
-        events.put(('status', value))
-
-    def render_queue():
-        files.delete(0, 'end')
-        for index, (link, item_status) in enumerate(state['queue'], 1):
-            files.insert('end', f'{index}. {item_status}  ·  {link}')
-
-    def start_queue():
-        if state['busy']:
-            return
-        try:
-            links = parse_links(links_box.get('1.0', 'end'))
-        except DownloadError as error:
-            messagebox.showerror('Check links', str(error), parent=root)
-            return
-        folder = destination.get().strip()
-        if not folder:
-            messagebox.showerror('Choose a folder', 'Choose where to save the video.', parent=root)
-            return
-        profile = profile_options.get(source.get())
-        stop.clear()
-        state['downloading'] = True
-        busy(True)
-        progress['value'] = 0
-        state['queue'] = [(link, 'Waiting') for link in links]
-        render_queue()
-        def work():
-            try:
-                completed, failures = download_queue(
-                    links, folder, profile, stop,
-                    lambda kind, data: events.put((kind, data)), pause=pause)
-                events.put(('summary', (completed, failures)))
-            except Cancelled as error:
-                events.put(('cancelled', str(error)))
-            except (DownloadError, ValueError, OSError) as error:
-                message = str(error) if isinstance(error, DownloadError) else 'The download could not complete. Check the destination and connection, then retry.'
-                events.put(('error', message))
-            except Exception:
-                events.put(('error', 'TeraBox returned an unexpected response. Completed downloads were kept.'))
-            finally:
-                events.put(('idle', None))
-        threading.Thread(target=work, daemon=True).start()
-
-    button = ttk.Button(actions, text='Download queue', command=start_queue)
-    button.pack(side='left')
-    def toggle_pause():
-        if not state['downloading'] or stop.is_set():
-            return
-        if pause.is_set():
-            pause.clear()
-            pause_button.configure(text='Pause')
-            status.set('Resuming…')
-        else:
-            pause.set()
-            pause_button.configure(text='Resume')
-            status.set('Pausing… waiting for the current network request to finish.')
-    pause_button = ttk.Button(actions, text='Pause', command=toggle_pause, state='disabled')
-    pause_button.pack(side='left', padx=(8, 0))
-    def cancel():
-        stop.set()
-        pause.clear()
-        pause_button.configure(state='disabled')
-        status.set('Cancelling… waiting for the current network request to finish.')
-    cancel_button = ttk.Button(actions, text='Cancel', command=cancel, state='disabled')
-    cancel_button.pack(side='left', padx=8)
-    check_button = ttk.Button(actions, text='Check login', command=check_login)
-    check_button.pack(side='left', padx=(8, 0))
-    forget_button = ttk.Button(actions, text='Disconnect Firefox', command=forget)
-    forget_button.pack(side='left', padx=8)
-    def poll():
-        while not events.empty():
-            kind, data = events.get()
-            if kind == 'status':
-                if isinstance(data, tuple):
-                    index, text = data
-                    message = f'Link {index + 1}/{len(state["queue"])}: {text}'
-                else:
-                    text = message = data
-                if stop.is_set():
-                    continue
-                if pause.is_set():
-                    if text == PAUSED_STATUS:
-                        status.set(message)
-                elif text != PAUSED_STATUS:
-                    status.set(message)
-            elif kind == 'login':
-                login_status.set(data)
-                status.set('Login check finished.')
-            elif kind == 'queue':
-                index, item_status = data
-                link, _ = state['queue'][index]
-                state['queue'][index] = (link, item_status)
-                render_queue()
-            elif kind == 'progress':
-                index, received, total = data
-                progress['value'] = received / total * 100
-                if not pause.is_set() and not stop.is_set():
-                    status.set(f'Link {index + 1}/{len(state["queue"])}: {human_size(received)} of {human_size(total)} — {received / total:.0%}')
-            elif kind == 'summary':
-                completed, failures = data
-                progress['value'] = 100 if completed else 0
-                status.set(f'Queue finished: {len(completed)} saved, {len(failures)} failed.')
-                for path in completed:
-                    files.insert('end', 'Saved: ' + path)
-                for failure in failures:
-                    files.insert('end', 'Failed: ' + failure.split('\n')[0])
-            elif kind in ('error', 'cancelled'):
-                status.set(data.split('\n')[0])
-            elif kind == 'idle':
-                busy(False)
-                if state['closing']:
-                    root.destroy()
-                    return
-        root.after(100, poll)
-    def close():
-        if state['busy']:
-            state['closing'] = True
-            cancel()
-        else:
-            root.destroy()
-    root.protocol('WM_DELETE_WINDOW', close)
-    root.after(100, poll)
-    root.mainloop()
+def gui(data_dir=None):
+    from tera_gui import gui as launch_gui
+    launch_gui(data_dir)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--data-dir', type=Path, help='Use an isolated local queue/settings directory.')
     parser.add_argument('--check', metavar='URL', help='List videos and test original-file URL resolution without downloading.')
     parser.add_argument('--firefox', action='store_true', help='Use the default Firefox profile for the check.')
     parser.add_argument('--profile', help='Firefox profile name to use with --firefox.')
     args = parser.parse_args()
     if not args.check:
-        gui()
+        gui(args.data_dir)
         return
     try:
         profile = None
