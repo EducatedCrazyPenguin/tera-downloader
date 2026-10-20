@@ -1,3 +1,13 @@
+# Personal desktop release 0.1.0
+
+Approved 20 October 2026. Extend the completed A–E roadmap below in four sequential slices: saved-byte verification/recovery feedback; filtered and sorted batch controls with atomic destination edits; private bounded diagnostics and About/Help; a self-contained per-user Windows installation. Track acceptance and verification in the P01–P06 checklist in todo.md. Keep the earlier live-provider gate pending.
+
+Use optional checkpoint verification callbacks and transient attempt-tagged queue snapshot fields, without a database migration. Search/sort Review and History only; Select/Deselect visible preserves hidden choices. Batch destination changes validate every selected job before a single save and preserve all jobs on failure.
+
+Diagnostics use allowlisted codes/times/counts only, two 128 KiB files, no private strings or automatic upload. Package Python/Tk/tray with PyInstaller and a quiet per-user Inno Setup installer under LocalAppData/Programs/Tera, preserving separate state and downloads. Version 0.1.0; no autostart, forced close, reboot or post-install launch. A mutex protects running instances from installer changes. CLI --data-dir overrides TERA_DATA_DIR, which overrides default state; isolated state disables legacy import. Saved destinations take priority over Windows Downloads/Tera.
+
+Verify focused tests, full offline suite, isolated synthetic native UI, packaged startup without system Python, synthetic upgrade retention, and actual installed shortcut startup with isolated state. Preserve user data and untracked AGENTS.md; commit/push completed slices. Existing historical roadmap follows unchanged. Evidence: 2/3 — Current code and approved plan establish scope; new runtime and installation checks are pending. No live download or authentication is authorized by this release plan.
+
 # Tera product roadmap and incorporation plan
 
 Date: 19 October 2026; updated 20 October 2026. Status: approved roadmap; Deliveries A-E implemented locally. Live-provider verification remains pending.
@@ -8,9 +18,9 @@ Turn the current Windows/Tkinter downloader into a dependable tool for heavy dow
 
 The capability map and build order below are the reviewable design proposal. They are not claims that these features already exist. Implementation tasks and acceptance checks live only in [todo.md](todo.md); do not create duplicate feature plans or a separate specification for each small preference.
 
-**Evidence: 2/3 â€” All five local deliveries have offline/native evidence, recorded below: 128 offline tests and the queue/recovery/limits and Windows tray/quiet-launcher checks pass on Python 3.12.10. Live TeraBox range/validator behavior, large real transfers and real notification delivery remain unverified. The capability map below records the approved design; delivery records establish what was implemented and tested.**
+**Evidence: 2/3 — All five local deliveries have offline/native evidence, recorded below: 128 offline tests and the queue/recovery/limits and Windows tray/quiet-launcher checks pass on Python 3.12.10. Live TeraBox range/validator behavior, large real transfers and real notification delivery remain unverified. The capability map below records the approved design; delivery records establish what was implemented and tested.**
 
-> ðŸ§  **From Hindsight memory (Pause and resume active Tera downloads)** â€” Existing Pause/Resume preserves the current stream, partial bytes, and queue position only while Tera stays open. Restart recovery and automatic reconnection were excluded from that earlier feature. Current source confirms these boundaries; this roadmap deliberately proposes extending them.
+> 🧠 **From Hindsight memory (Pause and resume active Tera downloads)** — Existing Pause/Resume preserves the current stream, partial bytes, and queue position only while Tera stays open. Restart recovery and automatic reconnection were excluded from that earlier feature. Current source confirms these boundaries; this roadmap deliberately proposes extending them.
 
 ### Coverage of the requested features
 
@@ -145,17 +155,17 @@ Confirmed by the user on 19 October 2026: clicking X saves the queue and exits; 
 - [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2): safe partial-response handling; it does not prove TeraBox supports resume.
 - [pystray integration guidance](https://pystray.readthedocs.io/en/latest/faq.html) and [usage](https://pystray.readthedocs.io/en/latest/usage.html): a Windows tray loop can coexist with the Tkinter main loop; native lifecycle behavior still requires testing.
 
-## Delivery A implementation record â€” 19 October 2026
+## Delivery A implementation record — 19 October 2026
 
 Implemented `app_state.py` (current-user DPAPI links, transactional SQLite state, atomic preferences, legacy import and data-directory locking), `queue_manager.py` (stable jobs/attempts, queue commands, history and progress), and `tera_gui.py` (queue/history views, destinations/favorites, controls and dashboard). `terabox.py` retains the direct transfer/legacy queue interfaces and routes GUI startup through the new view, with `--data-dir` for isolation. No dependency was added.
 
 Closing now saves pending jobs and exits after the owned transfer stops; interrupted files still restart from zero. Restoration starts no authentication or network work. Disconnect also blocks queued authenticated jobs until an explicit re-add, preventing silent cookie reuse or anonymous fallback. Source input stays in the textbox until a successful queue save is acknowledged.
 
-**Delivery A evidence: 3/3 â€” 47 offline tests passed; the withdrawn native Tkinter smoke verified the integrated flow, exact synthetic files, save/exit and restart, and the real isolated CLI entry point on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. No live Firefox login or TeraBox download was used.**
+**Delivery A evidence: 3/3 — 47 offline tests passed; the withdrawn native Tkinter smoke verified the integrated flow, exact synthetic files, save/exit and restart, and the real isolated CLI entry point on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. No live Firefox login or TeraBox download was used.**
 
 The initial UI still adds share links directly and discovers files when started. Review/selection and per-share folders belong to Delivery B; durable partial bytes, provider resume, and recovery policies belong to C. Rate/schedule/budget controls and tray/notification integration remain in D/E. The complete roadmap is not yet implemented.
 
-## Delivery B implementation record â€” 19 October 2026
+## Delivery B implementation record — 19 October 2026
 
 The UI now reviews submitted shares before Download selected, with persistent checkbox exclusions, known size totals and destinations. The existing coordinator owns those records and at most one additional metadata worker; clients and login sources remain isolated from the active transfer. Exact normalized sources and authoritative share/file/size identities prevent duplicate work. Prior-download receipts require a matching existing size and modification time, without claiming cryptographic verification.
 
@@ -163,39 +173,30 @@ The UI now reviews submitted shares before Download selected, with persistent ch
 
 The earlier Delivery A workflow description above records that delivery's initial state. Review and storage are now implemented, not pending. No schema migration, transport dependency, signed URL persistence or byte-level recovery was added. C-E remain pending.
 
-**Delivery B evidence: 3/3 for the checked local scope â€” 65 offline tests and the integrated withdrawn native Tkinter/isolated real-entry-point smoke passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. This includes synthetic exact files, saved review/exclusions, duplicate handling, storage correction, boundary pause, Cancel/reset and clean save/restore. Whole-product evidence remains 2/3: no live authentication/download, large-file, provider resume or installed-package check was run.**
+**Delivery B evidence: 3/3 for the checked local scope — 65 offline tests and the integrated withdrawn native Tkinter/isolated real-entry-point smoke passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. This includes synthetic exact files, saved review/exclusions, duplicate handling, storage correction, boundary pause, Cancel/reset and clean save/restore. Whole-product evidence remains 2/3: no live authentication/download, large-file, provider resume or installed-package check was run.**
 
-## Delivery C implementation record â€” 20 October 2026
+## Delivery C implementation record — 20 October 2026
 
 Implemented owned partial checkpoints and strict conditional continuation in `transfer_state.py`, plus error categories and bounded retry policy in `recovery.py`. The queue persists only metadata/validators and commits offsets after file flush/fsync. Save/exit keeps verified prefixes; explicit discard actions delete only owned partials. Recovery verifies the recorded file identity/hash, safely trims uncommitted tails, and checks both sides of final rename. The optional transport checkpoint parameter leaves the legacy default API behavior intact. Existing A/B records load with defaults; no schema migration was needed.
 
 Continuation requires fresh matching selected metadata, a strong ETag and exact If-Range/206 Content-Range/length. Unsafe replies hold for explicit Restart rather than appending or silently redownloading. A new explicit Retry cycle allows at most two attempts; Retry-After/default delay and consumed attempts are persisted. Pause/Cancel/exit remain responsive during the wait. Login and storage failures provide inline corrective actions; held login actions target that job's saved profile and cannot silently switch source.
 
-**Delivery C evidence: 3/3 for the checked local scope â€” 91 offline tests, the bounded real loopback HTTP fixture, three hidden forced-crash stages and the withdrawn native recovery/Restart flow passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Whole-product evidence remains 2/3: the live TeraBox provider gate, large real files, power loss, installed packaging and D/E remain pending. No real authentication/download or additional dependency was used.**
+**Delivery C evidence: 3/3 for the checked local scope — 91 offline tests, the bounded real loopback HTTP fixture, three hidden forced-crash stages and the withdrawn native recovery/Restart flow passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Whole-product evidence remains 2/3: the live TeraBox provider gate, large real files, power loss, installed packaging and D/E remain pending. No real authentication/download or additional dependency was used.**
 
-## Delivery D implementation record â€” 20 October 2026
+## Delivery D implementation record — 20 October 2026
 
 Implemented the runtime limits in `run_policy.py`, with the existing coordinator retaining ownership of run transitions and byte accounting. A shared limiter paces file-body reads and responds to cap changes, pause and cancellation. Daily windows use Windows local time, include overnight intervals, reevaluate without OS scheduling tasks and release only their own holds. Manual/boundary/error pauses remain separate. Time and byte limits finish the active file and latch until an explicit new run; their possible overrun is disclosed in the UI before starting.
 
 Run options and identity/start/counters persist through existing preferences and job payloads. Actual body reads count even when retransferred; existing resumed bytes do not. Resume, Apply limits and clear-history preserve the open run's budget. The deadline includes pauses, waiting and time after exit. Abrupt interruption of a byte-limited transfer conservatively holds uncertain accounting for an explicit new run while retaining the verified partial. Settings, timezone, current counter/deadline/hold and explicit Start new run are available in the native Run limits tab. No dependency or schema migration was needed.
 
-**Delivery D evidence: 3/3 for the checked local scope â€” 111 offline tests and the withdrawn native combined cap/window/boundary/retry/budget/save-restore scenario passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Whole-product evidence remains 2/3: E, live TeraBox compatibility, large real transfers, power loss and installed packaging remain pending. No real authentication/download, Windows autolaunch or power-setting change was used.**
+**Delivery D evidence: 3/3 for the checked local scope — 111 offline tests and the withdrawn native combined cap/window/boundary/retry/budget/save-restore scenario passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Whole-product evidence remains 2/3: E, live TeraBox compatibility, large real transfers, power loss and installed packaging remain pending. No real authentication/download, Windows autolaunch or power-setting change was used.**
 
-## Delivery E implementation record â€” 20 October 2026
+## Delivery E implementation record — 20 October 2026
 
 `desktop_integration.py` adds a lazy optional Windows tray backend. Tk is hidden only after checked Windows registration; missing/startup-failed support leaves it available, and a failed backend loop restores a hidden window. Show, Pause, Resume/Start, Cancel and Save/exit callbacks enqueue UI actions and use existing controls. X retains save/exit behavior. Startup and shutdown races are cancellation-aware; Tk keeps polling until the tray loop stops. Generic notifications default off, persist through existing preferences, and deduplicate download action-needed outcomes, completion and run limits without replaying restored history or schedule polls.
 
 `Start Tera.pyw` / `quiet_launcher.py` provide a console-free GUI entry point, preferring the project-local desktop environment and handing off before opening state. Safe, bounded local diagnostics record fixed events/PIDs only, including callback failures. `Start Tera.cmd` stays the diagnostic fallback. `requirements-desktop.txt` pins reviewed binary-wheel packages pystray 0.19.5, Pillow 13.0.0 and six 1.17.0; these extras require Python 3.11+, while base source syntax remains compatible with 3.10. The pinned pystray Windows message hook is narrowly overridden to detect rejected icon registration; recheck it when upgrading. No schema change, OS autostart/service, installer or shortcut was added. No existing Tera desktop shortcut was found.
 
-**Delivery E evidence: 3/3 for the checked local scope â€” 128 offline tests, dependency consistency, the withdrawn A-D native smoke, and the isolated Windows tray/real `.pyw`â†’`pythonw` lifecycle check passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. The native tray check covered restore, pause/resume, Cancel/reset, exact files, orderly exit, rejected registration and one intercepted generic notification; the launcher held the state lock and saved/exited on its owned WM_CLOSE. Later tray-close race and callback-log regressions passed offline. Whole-product evidence remains 2/3: real TeraBox resume/large files, long live pauses, real notification delivery, Explorer restart, sleep/resume, power loss and installed packaging are unverified.**
+**Delivery E evidence: 3/3 for the checked local scope — 128 offline tests, dependency consistency, the withdrawn A-D native smoke, and the isolated Windows tray/real `.pyw`→`pythonw` lifecycle check passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. The native tray check covered restore, pause/resume, Cancel/reset, exact files, orderly exit, rejected registration and one intercepted generic notification; the launcher held the state lock and saved/exited on its owned WM_CLOSE. Later tray-close race and callback-log regressions passed offline. Whole-product evidence remains 2/3: real TeraBox resume/large files, long live pauses, real notification delivery, Explorer restart, sleep/resume, power loss and installed packaging are unverified.**
 
 All local roadmap deliveries are complete. The sandbox denied the native tray message-filter API; the successful tray check used the explicitly approved context outside it. Initial native startup-ordering and selection-fixture failures were diagnosed and corrected. No provider keys, real Firefox sessions, live downloads or notification banners were used; test profiles, state and files were synthetic. All final owned processes/windows closed, and task-owned temporary folders were removed. The live-provider gate remains explicitly pending.
-# Personal desktop release 0.1.0
-
-Approved 20 October 2026. Extend the completed Aâ€“E roadmap below in four sequential slices: saved-byte verification/recovery feedback; filtered and sorted batch controls with atomic destination edits; private bounded diagnostics and About/Help; a self-contained per-user Windows installation. Track acceptance and verification in the P01â€“P06 checklist in todo.md. Keep the earlier live-provider gate pending.
-
-Use optional checkpoint verification callbacks and transient attempt-tagged queue snapshot fields, without a database migration. Search/sort Review and History only; Select/Deselect visible preserves hidden choices. Batch destination changes validate every selected job before a single save and preserve all jobs on failure.
-
-Diagnostics use allowlisted codes/times/counts only, two 128 KiB files, no private strings or automatic upload. Package Python/Tk/tray with PyInstaller and a quiet per-user Inno Setup installer under LocalAppData/Programs/Tera, preserving separate state and downloads. Version 0.1.0; no autostart, forced close, reboot or post-install launch. A mutex protects running instances from installer changes. CLI --data-dir overrides TERA_DATA_DIR, which overrides default state; isolated state disables legacy import. Saved destinations take priority over Windows Downloads/Tera.
-
-Verify focused tests, full offline suite, isolated synthetic native UI, packaged startup without system Python, synthetic upgrade retention, and actual installed shortcut startup with isolated state. Preserve user data and untracked AGENTS.md; commit/push completed slices. Existing historical roadmap follows unchanged. Evidence: 2/3 â€” Current code and approved plan establish scope; new runtime and installation checks are pending. No live download or authentication is authorized by this release plan.

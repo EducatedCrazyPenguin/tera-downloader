@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import time
 import uuid
 
 
@@ -180,7 +181,14 @@ class StateStore:
                 json.dump(preferences, output, ensure_ascii=False, indent=2)
                 output.flush()
                 os.fsync(output.fileno())
-            os.replace(temporary, path)
+            try:
+                os.replace(temporary, path)
+            except OSError as error:
+                # A brief Windows reader can deny replacement even after our own handle closes.
+                if os.name != 'nt' or getattr(error, 'winerror', None) not in {5, 32, 33}:
+                    raise
+                time.sleep(.05)
+                os.replace(temporary, path)
             return preferences
         except (OSError, ValueError) as error:
             raise StateError('Preferences could not be saved. The previous settings were kept.') from error

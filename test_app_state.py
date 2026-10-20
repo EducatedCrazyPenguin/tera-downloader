@@ -13,6 +13,29 @@ from app_state import StateError, StateStore, protect, unprotect
 
 
 class StateTests(unittest.TestCase):
+    def test_transient_windows_replace_denial_retries_once_and_persistent_failure_preserves_settings(self):
+        with tempfile.TemporaryDirectory() as folder, StateStore(folder) as store:
+            store.save_preferences({'last_destination': 'before'})
+            replace = os.replace
+            denied = PermissionError('Synthetic Windows sharing denial')
+            denied.winerror = 5
+            calls = []
+            def briefly_busy(source, target):
+                calls.append(1)
+                if len(calls) == 1:
+                    self.assertEqual(store.load_preferences()['last_destination'], 'before')
+                    raise denied
+                return replace(source, target)
+            with patch('app_state.os.replace', side_effect=briefly_busy):
+                store.save_preferences({'last_destination': 'after'})
+            self.assertEqual(len(calls), 2)
+            with patch('app_state.os.replace', side_effect=denied) as failed:
+                with self.assertRaises(StateError):
+                    store.save_preferences({'last_destination': 'lost'})
+                self.assertEqual(failed.call_count, 2)
+            self.assertEqual(store.load_preferences()['last_destination'], 'after')
+            self.assertEqual(list(Path(folder).glob('*.tmp')), [])
+
     def test_dpapi_round_trip_and_no_plaintext_source_on_disk(self):
         source = 'https://terabox.com/s/1synthetic?pwd=private-test-code'
         self.assertEqual(unprotect(protect(source.encode())), source.encode())
