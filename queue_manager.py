@@ -335,6 +335,17 @@ class QueueManager:
             job.status = 'excluded' if job.status == 'review' else 'review'
             self._save()
             return
+        if action == 'review_choices':
+            selected = data['selected']
+            if type(selected) is not bool:
+                raise DownloadError('Choose Select visible or Deselect visible.')
+            jobs = [self._job(identifier) for identifier in dict.fromkeys(data['job_ids'])]
+            if any(j.status not in {'review', 'excluded'} for j in jobs):
+                raise DownloadError('Wait for review to finish before selecting these files.')
+            for job in jobs:
+                job.status = 'review' if selected else 'excluded'
+            self._save()
+            return
         if action == 'review':
             links = parse_links('\n'.join(data['links']))
             folder = str(Path(data['folder']).resolve())
@@ -380,33 +391,41 @@ class QueueManager:
                 self._handle('start', {})
             self.message = 'Selected files queued.' if not self.pause.is_set() else 'Selected files queued. Resume when ready.'
             return
-        if action == 'destination':
-            job = self._job(data['job_id'])
-            if job.status not in {'pending', 'attention', 'review', 'excluded'}:
+        if action in {'destination', 'destinations'}:
+            identifiers = data['job_ids'] if action == 'destinations' else [data['job_id']]
+            jobs = [self._job(identifier) for identifier in dict.fromkeys(identifiers)]
+            if not jobs:
+                return
+            if any(j.id == self.active or j.status not in {'pending', 'attention', 'review', 'excluded'} for j in jobs):
                 raise DownloadError('Stop the active file before changing its destination; it must restart from zero.')
-            if job.checkpoint.get('file_id'):
+            if any(j.checkpoint.get('file_id') for j in jobs):
                 raise RestartRequired('Choose Restart from zero before changing the saved partial destination or name.')
             if 'name' in data:
                 name = data['name']
-                if not name or name != safe_name(name):
+                if action == 'destinations' or not name or name != safe_name(name):
                     raise DownloadError('Use a plain, safe file name without folders or reserved characters.')
-                if not job.video:
+                if not jobs[0].video:
                     raise DownloadError('Review the share before choosing a file name.')
-                job.output_name = name
             if 'folder' in data:
                 if not data['folder'].strip():
                     raise DownloadError('Choose a destination folder.')
-                job.folder = str(Path(data['folder']).resolve())
-            if job.status == 'attention':
-                job.status = 'pending'
-            job.error = ''
-            job.checkpoint, job.cycle_attempts = {}, 0
-            try:
-                self.review_space[job.folder] = available_space(job.folder)
-            except OSError:
-                self.review_space[job.folder] = None
+                folder = str(Path(data['folder']).resolve())
+            for job in jobs:
+                if 'name' in data:
+                    job.output_name = name
+                if 'folder' in data:
+                    job.folder = folder
+                if job.status == 'attention':
+                    job.status = 'pending'
+                job.error = ''
+                job.checkpoint, job.cycle_attempts = {}, 0
             self._save()
-            self.message = 'Destination updated. Resume when ready.'
+            for folder in {j.folder for j in jobs}:
+                try:
+                    self.review_space[folder] = available_space(folder)
+                except OSError:
+                    self.review_space[folder] = None
+            self.message = 'Destinations updated. Resume when ready.'
             return
         if action == '_review_result':
             if data['job_id'] != self.review_active:

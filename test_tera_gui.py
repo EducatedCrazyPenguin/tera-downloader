@@ -3,10 +3,27 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import terabox
-from tera_gui import TeraApp, duration_text, size_text
+from tera_gui import TeraApp, duration_text, size_text, visible_jobs, transfer_message
 
 
 class EntryTests(unittest.TestCase):
+    def test_filename_filter_and_numeric_sort_leave_source_order_unchanged(self):
+        jobs = [{'id': 'b', 'video': {'name': 'B.MP4', 'size': 20}, 'finished': 20},
+                {'id': 'a', 'video': {'name': 'a.mp4', 'size': 100}, 'finished': 10}]
+        self.assertEqual([j['id'] for j in visible_jobs(jobs, 'mp4', 'name', False)], ['a', 'b'])
+        self.assertEqual([j['id'] for j in visible_jobs(jobs, '', 'size', False)], ['b', 'a'])
+        self.assertEqual([j['id'] for j in visible_jobs(jobs, '', 'finished', True)], ['b', 'a'])
+        self.assertEqual([j['id'] for j in visible_jobs(jobs, 'A.MP4', 'name', False)], ['a'])
+        self.assertEqual([j['id'] for j in jobs], ['b', 'a'])
+
+    def test_pause_and_close_override_verification_message(self):
+        snapshot = {'verification': {'done': 1024, 'total': 2048}, 'message': 'Paused', 'paused': True}
+        self.assertEqual(transfer_message(snapshot), 'Paused')
+        snapshot['paused'] = False
+        self.assertIn('1.0 KB of 2.0 KB', transfer_message(snapshot))
+        snapshot['closing'] = True
+        self.assertEqual(transfer_message(snapshot), 'Paused')
+
     def test_cli_routes_isolated_data_directory_to_gui(self):
         with patch('sys.argv', ['terabox.py', '--data-dir', 'synthetic-state']), patch('tera_gui.gui') as launch:
             terabox.main()

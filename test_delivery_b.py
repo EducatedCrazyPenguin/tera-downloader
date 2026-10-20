@@ -93,6 +93,42 @@ class DeliveryBTests(unittest.TestCase):
         self.assertEqual(sum(j['status'] == 'pending' for j in current['jobs']), 1)
         self.assertEqual(sum(j['status'] == 'excluded' for j in current['jobs']), 2)
 
+    def test_batch_choices_preserve_hidden_rows_and_survive_restart(self):
+        jobs = self.review()['jobs']
+        self.manager.request('review_choices', job_ids=[jobs[0]['id']], selected=False)
+        self.assertEqual([j['status'] for j in self.manager.request('snapshot')['jobs']], ['excluded', 'review', 'review'])
+        self.stop(self.manager)
+        self.manager = self.make_manager()
+        self.assertEqual([j['status'] for j in self.manager.request('snapshot')['jobs']], ['excluded', 'review', 'review'])
+        self.manager.request('review_choices', job_ids=[jobs[0]['id']], selected=True)
+        self.assertTrue(all(j['status'] == 'review' for j in self.manager.request('snapshot')['jobs']))
+
+    def test_batch_destination_is_atomic_on_invalid_row_and_save_failure(self):
+        jobs = self.review()['jobs']
+        ids = [j['id'] for j in jobs]
+        folder = str(self.folder / 'changed')
+        with self.assertRaises(StateError):
+            self.manager.request('destinations', job_ids=[ids[0], 'missing'], folder=folder)
+        self.assertEqual(self.manager.request('snapshot')['jobs'], jobs)
+        with patch.object(self.manager.store, 'save_jobs', side_effect=StateError('Synthetic save failure')):
+            with self.assertRaises(StateError):
+                self.manager.request('destinations', job_ids=ids, folder=folder)
+        self.assertEqual(self.manager.request('snapshot')['jobs'], jobs)
+        self.manager.request('destinations', job_ids=ids, folder=folder)
+        self.assertTrue(all(j['folder'] == folder for j in self.manager.request('snapshot')['jobs']))
+        self.stop(self.manager)
+        self.manager = self.make_manager()
+        self.assertTrue(all(j['folder'] == folder for j in self.manager.request('snapshot')['jobs']))
+
+    def test_batch_destination_rejects_active_or_owned_partial_without_any_changes(self):
+        jobs = self.review()['jobs']
+        ids = [j['id'] for j in jobs]
+        self.manager.request('select', job_ids=ids)
+        active = self.wait(lambda s: s['active'] and any(c[0] == 'download' for c in Client.calls))
+        with self.assertRaises(StateError):
+            self.manager.request('destinations', job_ids=ids, folder=str(self.folder / 'changed'))
+        self.assertEqual([j['folder'] for j in self.manager.request('snapshot')['jobs']], [j['folder'] for j in active['jobs']])
+
     def test_aliases_in_review_are_unselected_and_changed_sizes_stay_distinct(self):
         self.review()
         snapshot = self.review([LINK.replace('terabox.com', 'terasharelink.com')])

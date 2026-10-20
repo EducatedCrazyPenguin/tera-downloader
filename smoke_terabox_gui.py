@@ -59,6 +59,14 @@ class SyntheticClient(terabox.TeraBox):
         if video.fid == 'broken' and type(self).fail_once:
             type(self).fail_once = False
             raise terabox.DownloadError('Synthetic unavailable file.')
+        if checkpoint and checkpoint.record['offset']:
+            original = checkpoint.verification
+            def verification(done, total):
+                original(done, total)
+                if done == 0 and total:
+                    self.cancel.wait(.3)
+                    self.check_cancel()
+            checkpoint.verification = verification
         return super().download(video, folder, progress, checkpoint=checkpoint, policy=policy)
 
     def open(self, *args, **kwargs):
@@ -269,6 +277,22 @@ def main():
             submit(LINK + '\n' + LINK + '#view', base / 'videos')
             assert len(app.snapshot['jobs']) == 3 and len(SyntheticClient.calls) == 1
             assert '3 selected' in app.review_summary.get()
+            app.review_search.set('FIRST')
+            assert len(app.review_tree.get_children()) == 1
+            app.choose_visible(False)
+            wait(lambda: app.snapshot['jobs'][0]['status'] == 'excluded', 'filtered deselection')
+            assert '2 selected' in app.review_summary.get()
+            app.choose_visible(True)
+            wait(lambda: app.snapshot['jobs'][0]['status'] == 'review', 'filtered selection')
+            app.review_search.set('')
+            app.review_sort.set('Name Z–A')
+            assert app.review_tree.get_children()[0] == app.snapshot['jobs'][2]['id']
+            app.review_sort.set('Original order')
+            app.review_tree.selection_set([j['id'] for j in app.snapshot['jobs']])
+            with patch('tera_gui.filedialog.askdirectory', return_value=str(base / 'videos')) as picker:
+                app.change_destination(app.review_tree)
+                assert picker.call_count == 1
+            wait(lambda: 'Destinations updated' in app.status.get(), 'batch destination')
             second = app.snapshot['jobs'][1]['id']
             app.review_tree.selection_set(second)
             app.toggle_review(SimpleNamespace(keysym='space'))
@@ -376,6 +400,8 @@ def main():
             assert list(base.glob('restore2/.tera-*.part'))
             assert any(j['checkpoint'].get('offset', 0) > 0 for j in app.snapshot['jobs'])
             app.start_button.invoke()
+            wait(lambda: app.status.get().startswith('Checking saved download:'), 'native verification progress')
+            assert app.snapshot['speed'] == 0
             wait(lambda: not app.snapshot['running'] and not any(j['status'] in {'pending', 'downloading'} for j in app.snapshot['jobs']), 'restored queue')
             assert any(kind == 'range' and value > 0 for kind, value in SyntheticClient.calls[calls:])
             assert all(Path(j['path']).read_bytes() == BODY for j in app.snapshot['jobs'] if j['status'] == 'completed')

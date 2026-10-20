@@ -40,6 +40,24 @@ def transfer_message(snapshot):
     return snapshot['message']
 
 
+SORTS = {'Original order': ('', False), 'Name A–Z': ('name', False), 'Name Z–A': ('name', True),
+         'Size: smallest first': ('size', False), 'Size: largest first': ('size', True),
+         'Newest first': ('finished', True), 'Oldest first': ('finished', False)}
+
+
+def visible_jobs(jobs, search, sort='', reverse=False):
+    def name(job):
+        return job.get('output_name') or (job['video']['name'] if job.get('video') else 'Share awaiting discovery')
+    result = [j for j in jobs if search.strip().casefold() in name(j).casefold()]
+    if sort:
+        def key(job):
+            if sort == 'name':
+                return name(job).casefold()
+            return (job.get('video') or {}).get('size', 0) if sort == 'size' else job.get('finished', 0)
+        result.sort(key=key, reverse=reverse)
+    return result
+
+
 class TeraApp:
     def __init__(self, root, manager, client_factory=None, available_profiles=None, desktop_factory=None):
         self.root, self.manager = root, manager
@@ -162,11 +180,16 @@ class TeraApp:
         ttk.Label(self.limits_page, text='Zero means unlimited. Limits finish the current file and can overrun by its remaining bytes/time.\nThe run clock includes pauses, window waits and exit time. Only schedule holds auto-resume.', wraplength=720).grid(row=4, column=1, columnspan=3, sticky='w')
         self.run_summary = tk.StringVar(value='No run started')
         ttk.Label(self.limits_page, textvariable=self.run_summary, wraplength=920).grid(row=5, column=0, columnspan=4, sticky='w')
+        self.review_search, self.review_sort = self.search_controls(self.review_page, 'Review', list(SORTS)[:5])
         self.review_tree = self._tree(self.review_page, ('chosen', 'name', 'size', 'folder', 'detail'),
                                       ('Download', 'Video', 'Size', 'Destination', 'Review / duplicate check'))
         self.review_tree.column('chosen', width=85, stretch=False)
         self.review_tree.bind('<ButtonRelease-1>', self.toggle_review)
         self.review_tree.bind('<space>', self.toggle_review)
+        selection_row = ttk.Frame(self.review_page)
+        selection_row.pack(fill='x')
+        ttk.Button(selection_row, text='Select visible', command=lambda: self.choose_visible(True)).pack(side='left')
+        ttk.Button(selection_row, text='Deselect visible', command=lambda: self.choose_visible(False)).pack(side='left', padx=6)
         self.review_summary = tk.StringVar(value='Review links to choose videos before downloading.')
         ttk.Label(self.review_page, textvariable=self.review_summary, wraplength=930).pack(anchor='w', pady=4)
         review_actions = ttk.Frame(self.review_page)
@@ -207,6 +230,7 @@ class TeraApp:
         self.clear_button.pack(side='left', padx=6)
         self.restart_history_button = ttk.Button(filter_row, text='Restart from zero', command=lambda: self.restart_selected(self.history_tree))
         self.restart_history_button.pack(side='left')
+        self.history_search, self.history_sort = self.search_controls(history_page, 'History', list(SORTS)[:3] + list(SORTS)[5:])
         self.history_tree = self._tree(history_page, ('name', 'status', 'finished', 'detail'),
                                        ('Video / share', 'Status', 'Finished', 'Detail'))
         self.queue_tree.bind('<<TreeviewSelect>>', lambda event: self.configure_controls())
@@ -246,6 +270,24 @@ class TeraApp:
         vertical.pack(side='right', fill='y')
         tree.pack(fill='both', expand=True)
         return tree
+
+    def search_controls(self, parent, label, sorts):
+        row = ttk.Frame(parent)
+        row.pack(fill='x', pady=4)
+        ttk.Label(row, text=label + ' filename').pack(side='left')
+        search, sort = tk.StringVar(), tk.StringVar(value='Original order')
+        ttk.Entry(row, textvariable=search).pack(side='left', fill='x', expand=True, padx=6)
+        ttk.Label(row, text='Sort').pack(side='left')
+        ttk.Combobox(row, textvariable=sort, values=sorts, state='readonly', width=22).pack(side='left', padx=6)
+        search.trace_add('write', lambda *args: self.render())
+        sort.trace_add('write', lambda *args: self.render())
+        return search, sort
+
+    def choose_visible(self, selected):
+        if self.snapshot:
+            visible = set(self.review_tree.get_children())
+            self.send('review_choices', job_ids=[j['id'] for j in self.snapshot['jobs']
+                                                if j['id'] in visible and j['status'] in {'review', 'excluded'}], selected=selected)
 
     def send(self, action, **data):
         if not self.closing and self.initialized and not self.manager.closed.is_set():
@@ -418,15 +460,16 @@ class TeraApp:
             self.send('select', job_ids=[j['id'] for j in self.snapshot['jobs'] if j['status'] == 'review'])
 
     def change_destination(self, tree):
-        for identifier in tree.selection():
-            job = next(j for j in self.snapshot['jobs'] if j['id'] == identifier)
-            if job['status'] not in {'pending', 'attention', 'review', 'excluded'}:
-                self.status.set('Stop the active file before changing its destination; it must restart from zero.')
-                return
-            folder = filedialog.askdirectory(parent=self.root, initialdir=job['folder'], title='New destination for selected file')
-            if folder:
-                self.send('destination', job_id=identifier, folder=folder)
-            break
+        identifiers = list(tree.selection())
+        if not identifiers:
+            return
+        jobs = [j for j in self.snapshot['jobs'] if j['id'] in identifiers]
+        if any(j['status'] not in {'pending', 'attention', 'review', 'excluded'} or j['checkpoint'].get('file_id') for j in jobs):
+            self.status.set('No folders changed. Stop active files and choose Restart from zero for saved partials first.')
+            return
+        folder = filedialog.askdirectory(parent=self.root, initialdir=jobs[0]['folder'], title='New destination for all selected files')
+        if folder:
+            self.send('destinations', job_ids=identifiers, folder=folder)
 
     def rename_selected(self, tree):
         selection = tree.selection()
@@ -552,7 +595,10 @@ class TeraApp:
         rows = []
         history = []
         review = []
-        for job in jobs:
+        reviewed = visible_jobs([j for j in jobs if j['status'] in REVIEW], self.review_search.get(), *SORTS[self.review_sort.get()])
+        historical = visible_jobs([j for j in jobs if j['status'] in TERMINAL], self.history_search.get(), *SORTS[self.history_sort.get()])
+        queued = [j for j in jobs if j['status'] not in REVIEW | TERMINAL]
+        for job in reviewed + queued + historical:
             video = job['video']
             name = job['output_name'] or (video['name'] if video else 'Share awaiting discovery')
             if job['status'] in REVIEW:
