@@ -345,6 +345,16 @@ def main():
             wait(lambda: not app.snapshot['running'] and not any(j['status'] in {'pending', 'downloading'} for j in app.snapshot['jobs']), 'retry complete')
             completed = [j for j in app.snapshot['jobs'] if j['status'] == 'completed']
             assert len(completed) == 4 and all(Path(j['path']).read_bytes() == BODY for j in completed)
+            app.history_search.set('APPROVED')
+            assert len(app.history_tree.get_children()) == 1
+            app.history_sort.set('Newest first')
+            app.history_search.set('')
+            with patch('tera_gui.filedialog.asksaveasfilename', return_value=str(base / 'diagnostics.json')):
+                app.diagnostics_button.invoke()
+            wait(lambda: 'Diagnostics saved' in app.status.get(), 'diagnostics export')
+            report = (base / 'diagnostics.json').read_text(encoding='utf-8')
+            assert '0.1.0' in report and 'completed' in report
+            assert LINK not in report and 'approved.mp4' not in report and str(base) not in report
             app.history_tree.selection_set(completed[0]['id'])
             app.configure_controls()
             with patch('tera_gui.os.startfile') as opened:

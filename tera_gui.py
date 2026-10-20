@@ -17,6 +17,7 @@ from queue_manager import QueueManager, TERMINAL, REVIEW, HOLDS
 from terabox import DownloadError, TeraBox, open_firefox, parse_links
 from run_policy import validate_options
 from desktop_integration import Desktop, Notifications, available as desktop_available
+from app_version import VERSION
 
 
 def size_text(value):
@@ -233,6 +234,24 @@ class TeraApp:
         self.history_search, self.history_sort = self.search_controls(history_page, 'History', list(SORTS)[:3] + list(SORTS)[5:])
         self.history_tree = self._tree(history_page, ('name', 'status', 'finished', 'detail'),
                                        ('Video / share', 'Status', 'Finished', 'Detail'))
+        help_page = ttk.Frame(notebook, padding=12)
+        notebook.add(help_page, text='Help / About')
+        ttk.Label(help_page, text=f'Tera {VERSION}', font=('Segoe UI', 16, 'bold')).pack(anchor='w')
+        ttk.Label(help_page, text=(
+            'Select your Firefox profile, sign into TeraBox there, then use Check login.\n'
+            'Review links and choose videos before downloading.\n\n'
+            'Checking saved download verifies your existing bytes before continuing.\n'
+            'Login required: refresh the saved Firefox login, then Retry selected.\n'
+            'Storage needs attention: check the destination, free space and conflicting files.\n'
+            'Restart required: continuing could not be verified; Restart from zero discards that partial.\n'
+            'Retry waits are bounded. Pause, Cancel and X remain available.\n'
+            'X saves the queue and exits. Reopening waits for Start.\n\n'
+            'Diagnostics contain version, fixed event codes, times and counts only.\n'
+            'They exclude filenames, folders, links, credentials and raw error text.\n'
+            'Nothing is uploaded. Live TeraBox resume support remains unverified.'),
+            wraplength=780, justify='left').pack(anchor='w', pady=12)
+        self.diagnostics_button = ttk.Button(help_page, text='Save diagnostics…', command=self.save_diagnostics)
+        self.diagnostics_button.pack(anchor='w')
         self.queue_tree.bind('<<TreeviewSelect>>', lambda event: self.configure_controls())
         self.history_tree.bind('<<TreeviewSelect>>', lambda event: self.configure_controls())
         self.status = tk.StringVar(value='Opening saved queue…')
@@ -282,6 +301,13 @@ class TeraApp:
         search.trace_add('write', lambda *args: self.render())
         sort.trace_add('write', lambda *args: self.render())
         return search, sort
+
+    def save_diagnostics(self):
+        destination = filedialog.asksaveasfilename(parent=self.root, title='Save private diagnostics',
+                                                  initialfile='Tera-diagnostics.json', defaultextension='.json',
+                                                  filetypes=[('Diagnostics', '*.json')])
+        if destination:
+            self.send('diagnostics', destination=destination)
 
     def choose_visible(self, selected):
         if self.snapshot:

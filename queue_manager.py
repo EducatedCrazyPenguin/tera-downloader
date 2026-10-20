@@ -12,6 +12,7 @@ import queue
 import threading
 import time
 import uuid
+import diagnostics
 
 from app_state import StateError, StateStore
 from firefox_session import FirefoxProfile
@@ -172,6 +173,7 @@ class QueueManager:
             except (TypeError, ValueError, DownloadError):
                 raise StateError('Saved jobs are invalid. The queue was left unchanged.') from None
             self.saved_jobs = deepcopy(self.jobs)
+            diagnostics.record(self.directory, 'opened')
             self.ready.set()
             self._publish()
             while True:
@@ -183,6 +185,8 @@ class QueueManager:
                     continue
                 try:
                     value = self._handle(action, data)
+                    if action in {'pause', 'start', 'cancel', 'close'}:
+                        diagnostics.record(self.directory, action)
                     if action != 'snapshot':
                         self._advance_review()
                     self._advance()
@@ -201,6 +205,7 @@ class QueueManager:
                         self.cancel.set()
                     message = str(error) if isinstance(error, (StateError, DownloadError)) else 'The operation could not finish. Check the selected folder and retry.'
                     self.message = message
+                    diagnostics.record(self.directory, 'error', kind=getattr(error, 'kind', 'storage' if isinstance(error, (StateError, OSError)) else 'unknown'))
                     self.events.put(('error', message))
                     if reply:
                         reply.put((False, StateError(message)))
@@ -274,6 +279,10 @@ class QueueManager:
             return
         if action == 'snapshot':
             return self._snapshot()
+        if action == 'diagnostics':
+            diagnostics.export(self.directory, data['destination'])
+            self.message = 'Diagnostics saved. The report contains only version, event codes, times and counts.'
+            return
         if action == 'configure_run':
             options = validate_options(data['options'])
             self.preferences = self.store.save_preferences({'run_options': options})
@@ -712,6 +721,7 @@ class QueueManager:
                     if job.status not in HOLDS:
                         self.message = PAUSED_STATUS
                 self._save()
+                diagnostics.record(self.directory, job.status, kind=job.error_kind, attempt=job.cycle_attempts, received=job.received)
             return
         raise DownloadError('Unsupported queue action.')
 
@@ -766,6 +776,7 @@ class QueueManager:
         self.meter.reset(job.received)
         self._save()
         pending = [(j.folder, j.video['size'] - j.checkpoint.get('offset', 0)) for j in self.jobs if j.video and j.status in {'pending', 'downloading'}]
+        diagnostics.record(self.directory, 'attempt', attempt=job.cycle_attempts, received=job.received)
         self.worker = threading.Thread(target=self._transfer, args=(deepcopy(job), self.cancel, pending, self.discard_current),
                                        name='Tera transfer', daemon=True)
         self.worker.start()
