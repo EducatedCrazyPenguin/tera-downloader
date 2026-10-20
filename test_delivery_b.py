@@ -239,7 +239,7 @@ class DeliveryBTests(unittest.TestCase):
         release = threading.Event()
         self.addCleanup(release.set)
         class FinalizeClient(ReviewClient):
-            def download(self, video, folder, progress, *, checkpoint=None):
+            def download(self, video, folder, progress, *, checkpoint=None, policy=None):
                 from terabox import TeraBox
                 def update(done, total):
                     progress(done, total)
@@ -247,7 +247,7 @@ class DeliveryBTests(unittest.TestCase):
                         written.set()
                         while not release.wait(.01):
                             self.check_cancel()
-                return TeraBox.download(self, video, folder, update, checkpoint=checkpoint)
+                return TeraBox.download(self, video, folder, update, checkpoint=checkpoint, policy=policy)
         self.stop(self.manager)
         self.manager = self.make_manager(FinalizeClient)
         reviewed = self.review()

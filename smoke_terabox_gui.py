@@ -3,6 +3,7 @@
 No profiles/settings from the user, shell opens, network, or child processes.
 """
 import io
+from datetime import datetime, timedelta, timezone
 import os
 import runpy
 import tempfile
@@ -53,12 +54,12 @@ class SyntheticClient(terabox.TeraBox):
         self.cancel.wait(.05)
         self.check_cancel()
 
-    def download(self, video, folder, progress, *, checkpoint=None):
+    def download(self, video, folder, progress, *, checkpoint=None, policy=None):
         self.calls.append(('download', video.fid))
         if video.fid == 'broken' and type(self).fail_once:
             type(self).fail_once = False
             raise terabox.DownloadError('Synthetic unavailable file.')
-        return super().download(video, folder, progress, checkpoint=checkpoint)
+        return super().download(video, folder, progress, checkpoint=checkpoint, policy=policy)
 
     def open(self, *args, **kwargs):
         self.check_cancel()
@@ -66,6 +67,143 @@ class SyntheticClient(terabox.TeraBox):
         offset = int(headers.get('Range', 'bytes=0-')[6:-1])
         self.calls.append(('range', offset))
         return SyntheticResponse(BODY, offset)
+
+
+def check_run_limits(base):
+    """A single bounded native scenario combining D with C's recovery path."""
+    body = b'policy-data' * 512
+    calls, owned, errors = [], [], []
+    class TinyClient(SyntheticClient):
+        fail_second = True
+        def find_videos(self, link):
+            self.metadata = {'shareid': '999'}
+            return [terabox.Video(name + '.mp4', len(body), name, 'https://terabox.com/policy-' + name)
+                    for name in ('first', 'second', 'third')]
+        def download(self, video, folder, progress, *, checkpoint=None, policy=None):
+            return terabox.TeraBox.download(self, video, folder, progress, checkpoint=checkpoint, policy=policy)
+        def open(self, url, data=None, headers=None):
+            self.check_cancel()
+            name = url.rsplit('-', 1)[-1]
+            offset = int((headers or {}).get('Range', 'bytes=0-')[6:-1])
+            calls.append((name, offset))
+            if name == 'second' and type(self).fail_second:
+                type(self).fail_second = False
+                raise terabox.DownloadError('Synthetic retry wait.', kind='transient', retry_after=.35)
+            response = io.BytesIO(body[offset:])
+            response.status = 206 if offset else 200
+            response.headers = {'Content-Type': 'application/octet-stream', 'Content-Length': str(len(body) - offset), 'ETag': '"policy-' + name + '"'}
+            if offset:
+                response.headers['Content-Range'] = f'bytes {offset}-{len(body)-1}/{len(body)}'
+            return response
+
+    def create():
+        manager = QueueManager(base / 'state', TinyClient)
+        root = tk.Tk()
+        root.withdraw()
+        root.report_callback_exception = lambda kind, error, trace: errors.append(error)
+        app = TeraApp(root, manager, TinyClient, available_profiles=[])
+        owned.append((root, manager, app))
+        return root, manager, app
+
+    expires = time.monotonic() + 40
+    def wait(predicate, label, seconds=4):
+        deadline = min(expires, time.monotonic() + seconds)
+        while time.monotonic() < deadline:
+            root.update()
+            assert not errors, errors
+            if predicate(): return app.snapshot
+            time.sleep(.01)
+        raise AssertionError(f'Run limits {label}: {app.status.get()}; ' + repr(app.snapshot))
+
+    local = datetime(2026, 10, 20, 8, 59, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+    with patch('run_policy.local_now', return_value=local) as clock:
+        try:
+            root, manager, app = create()
+            wait(lambda: app.initialized, 'startup')
+            app.limit_speed.set('8')
+            app.limit_bytes.set(str((len(body) + 1000) / (1024 * 1024)))
+            app.window_start.set('09:00')
+            app.window_end.set('10:00')
+            app.window_enabled.set(True)
+            app.apply_limits_button.invoke()
+            wait(lambda: app.snapshot['run_options']['speed_bps'] == 8192, 'settings applied')
+            assert 'UTC' in app.timezone_text.get()
+            app.destination.set(str(base / 'videos'))
+            app.links_box.insert('1.0', LINK)
+            app.add_button.invoke()
+            wait(lambda: app.pending_add is None and not app.snapshot['review_busy'], 'review')
+            app.download_button.invoke()
+            wait(lambda: app.snapshot['policy_hold'] == 'schedule' and app.snapshot['running'], 'armed schedule')
+            assert calls == [] and app.start_button.instate(['disabled'])
+            assert not app.pause_button.instate(['disabled'])
+            app.pause_button.invoke()
+            wait(lambda: app.snapshot['manual_paused'], 'manual hold outside window')
+            clock.return_value = local.replace(hour=9)
+            wait(lambda: app.snapshot['policy_hold'] == '', 'window opening')
+            assert calls == [] and app.snapshot['manual_paused']
+            app.start_button.invoke()
+            wait(lambda: app.snapshot['run_state']['bytes'] > 0, 'capped transfer')
+            app.limit_speed.set(str(1 / 1024))
+            app.apply_limits_button.invoke()
+            wait(lambda: app.snapshot['run_options']['speed_bps'] == 1, 'hot cap change')
+            app.pause_button.invoke()
+            wait(lambda: app.snapshot['manual_paused'] and app.snapshot['pause_acknowledged'], 'pause while throttled')
+            job = next(j for j in app.snapshot['jobs'] if j['id'] == app.snapshot['active'])
+            prefix = job['checkpoint']['offset']
+            assert prefix == job['received'] == app.snapshot['run_state']['bytes'] and prefix > 0
+            app.close()
+            wait(lambda: manager.closed.is_set() and app.destroyed, 'save/exit under cap')
+            before = len(calls)
+            root, manager, app = create()
+            wait(lambda: app.initialized, 'restore')
+            assert len(calls) == before and not app.snapshot['running']
+            assert app.snapshot['run_state']['bytes'] == prefix and app.snapshot['run_options']['speed_bps'] == 1
+            app.limit_speed.set('8')
+            app.apply_limits_button.invoke()
+            wait(lambda: app.snapshot['run_options']['speed_bps'] == 8192, 'restore cap')
+            app.start_button.invoke()
+            wait(lambda: app.snapshot['active'] and app.snapshot['received'] > prefix, 'validated capped continuation')
+            app.boundary_button.invoke()
+            clock.return_value = local.replace(hour=10)
+            held = wait(lambda: not app.snapshot['active'] and app.snapshot['manual_paused'], 'boundary/window hold')
+            assert [j['status'] for j in held['jobs']] == ['completed', 'pending', 'pending']
+            assert held['run_state']['bytes'] == len(body) and calls[-1] == ('first', prefix)
+            clock.return_value = local.replace(day=21, hour=9)
+            wait(lambda: app.snapshot['policy_hold'] == '', 'next window with manual hold')
+            assert app.snapshot['manual_paused'] and calls[-1] == ('first', prefix)
+            app.start_button.invoke()
+            wait(lambda: any(j['status'] == 'retry_wait' for j in app.snapshot['jobs']), 'bounded retry')
+            clock.return_value = local.replace(day=21, hour=10)
+            wait(lambda: app.snapshot['policy_hold'] == 'schedule' and not app.snapshot['active'], 'retry/window hold')
+            app.pause_button.invoke()
+            wait(lambda: app.snapshot['manual_paused'], 'manual retry hold')
+            before = len(calls)
+            clock.return_value = local.replace(day=22, hour=9)
+            wait(lambda: app.snapshot['policy_hold'] == '', 'window cannot override retry pause')
+            assert len(calls) == before
+            app.start_button.invoke()
+            held = wait(lambda: app.snapshot['policy_hold'] == 'bytes' and not app.snapshot['active'], 'byte budget boundary')
+            assert [j['status'] for j in held['jobs']] == ['completed', 'completed', 'pending']
+            assert held['run_state']['bytes'] == 2 * len(body) and held['jobs'][1]['cycle_attempts'] == 2
+            assert app.start_button.instate(['disabled']) and not app.new_run_button.instate(['disabled'])
+            app.window_enabled.set(False)
+            app.apply_limits_button.invoke()
+            wait(lambda: not app.snapshot['run_options']['schedule_enabled'], 'disable schedule without releasing budget')
+            assert app.snapshot['policy_hold'] == 'bytes'
+            app.new_run_button.invoke()
+            finished = wait(lambda: all(j['status'] == 'completed' for j in app.snapshot['jobs']), 'explicit new run')
+            assert finished['run_state']['bytes'] == len(body)
+            assert all(Path(j['path']).read_bytes() == body for j in finished['jobs'])
+            assert app.pause_button.instate(['disabled']) and app.cancel_button.instate(['disabled'])
+            app.close()
+            wait(lambda: manager.closed.is_set() and app.destroyed, 'clean exit')
+        finally:
+            for owned_root, owned_manager, owned_app in owned:
+                if not owned_manager.closed.is_set(): owned_manager.post('close')
+                assert owned_manager.closed.wait(4)
+                owned_manager.thread.join(1)
+                try: owned_app.destroy()
+                except tk.TclError: pass
 
 
 def main():
@@ -313,10 +451,12 @@ def main():
         assert startup['passed']
         startup['app'].manager.thread.join(1)
         assert startup['app'].manager.closed.is_set()
+        check_run_limits(base / 'run-limits')
         print('PASS: native review/checkbox selection, duplicate inputs/aliases, exclusions, per-share folders, rename/folder conflict correction')
         print('PASS: favorites, login isolation, failed-save recovery, queue append/edit, pause/rapid toggles, finish-current pause, cancel/reset')
         print('PASS: byte-exact files, history/retry/clear, reveal stub, save/exit, held restore, isolated real CLI startup/exit')
         print('PASS: retained durable bytes, validated Range continuation, bounded retry, rejected 200 response, explicit Restart control')
+        print('PASS: native cap changes/throttle pause, schedule/manual precedence, boundary hold, retry/window interaction, byte budget, explicit new run, save/restore and exact files')
 
 
 if __name__ == '__main__':

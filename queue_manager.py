@@ -21,6 +21,7 @@ from terabox import Cancelled, DownloadError, PAUSED_STATUS, TeraBox, parse_link
 from terabox import safe_name
 from recovery import can_retry
 from transfer_state import Checkpoint, RestartRequired, fresh_checkpoint
+from run_policy import BandwidthLimiter, RunPolicy, TransferPolicy, local_now, validate_options
 
 
 TERMINAL = {'completed', 'failed', 'skipped', 'cancelled'}
@@ -75,6 +76,8 @@ class Job:
     cycle_attempts: int = 0
     retry_due: float = 0.0
     error_kind: str = ''
+    run_id: str = ''
+    run_bytes: int = 0
 
 
 class QueueManager:
@@ -133,9 +136,18 @@ class QueueManager:
         try:
             store = self.store = StateStore(self.directory, self.legacy_settings)
             self.preferences = store.load_preferences()
+            self.policy = RunPolicy(self.preferences.get('run_options'), self.preferences.get('run_state'))
+            self.policy_saved = deepcopy(self.policy.record)
+            self.policy_hold = ''
+            self.limiter = BandwidthLimiter(self.policy.options['speed_bps'])
             try:
                 for row in store.load_jobs():
                     job = Job(**row)
+                    if (job.status == 'downloading' and self.policy.options['byte_budget'] and self.policy.record['open']
+                            and job.run_id == self.policy.record['id'] and (not isinstance(job.checkpoint, dict) or job.checkpoint.get('phase') != 'ready')):
+                        self.policy.record['limit_hold'] = 'recovery'
+                    if type(job.run_bytes) is not int or job.run_bytes < 0:
+                        raise ValueError('Invalid run byte count')
                     parse_links(job.link)
                     if job.status not in TERMINAL | REVIEW | HOLDS | {'pending', 'resolving', 'downloading', 'retry_wait'}:
                         raise ValueError('Invalid status')
@@ -155,6 +167,7 @@ class QueueManager:
                     if type(job.cycle_attempts) is not int or not 0 <= job.cycle_attempts <= 2:
                         raise ValueError('Invalid retry budget')
                     self.jobs.append(job)
+                self.policy.record['bytes'] = max(self.policy.record['bytes'], sum(j.run_bytes for j in self.jobs if j.run_id == self.policy.record['id']))
             except (TypeError, ValueError, DownloadError):
                 raise StateError('Saved jobs are invalid. The queue was left unchanged.') from None
             self.saved_jobs = deepcopy(self.jobs)
@@ -174,7 +187,7 @@ class QueueManager:
                     self._advance()
                     if action == 'snapshot':
                         value = self._snapshot()
-                    else:
+                    elif action != '_bytes':
                         self._publish()
                     if reply:
                         reply.put((True, value))
@@ -184,6 +197,7 @@ class QueueManager:
                         self.running = False
                         self.pause.set()
                         self.error_hold = True
+                        self.cancel.set()
                     message = str(error) if isinstance(error, (StateError, DownloadError)) else 'The operation could not finish. Check the selected folder and retry.'
                     self.message = message
                     self.events.put(('error', message))
@@ -213,6 +227,9 @@ class QueueManager:
         # Transport URLs/cookies never enter Job or its serialized representation.
         try:
             self.store.save_jobs([asdict(job) for job in self.jobs])
+            if self.policy.record != self.policy_saved:
+                self.preferences = self.store.save_preferences({'run_state': self.policy.record})
+                self.policy_saved = deepcopy(self.policy.record)
         except StateError:
             self.jobs = deepcopy(self.saved_jobs)
             self.running = False
@@ -256,6 +273,27 @@ class QueueManager:
             return
         if action == 'snapshot':
             return self._snapshot()
+        if action == 'configure_run':
+            options = validate_options(data['options'])
+            self.preferences = self.store.save_preferences({'run_options': options})
+            previous_speed = self.policy.options['speed_bps']
+            self.policy.options = options
+            if previous_speed != options['speed_bps']:
+                self.limiter.set_rate(options['speed_bps'])
+            self.message = 'Run settings applied. Time and byte limits finish the current file before holding.'
+            return
+        if action == '_bytes':
+            if self.active != data['job_id']:
+                return False
+            job = self._job(data['job_id'])
+            if job.attempt != data['attempt']:
+                return False
+            amount = data['amount']
+            if type(amount) is not int or amount < 0:
+                raise DownloadError('Invalid transfer byte count.')
+            job.run_bytes += amount
+            self.policy.add_bytes(amount)
+            return True
         if action == '_checkpoint':
             if self.active != data['job_id']:
                 return False
@@ -269,6 +307,9 @@ class QueueManager:
                 raise StateError('A changed partial ownership record was rejected.')
             self._checkpoint_state(replace(job, checkpoint=record))
             job.checkpoint = deepcopy(record)
+            if record['offset'] > job.received:
+                job.received = record['offset']
+                self.meter.update(job.received)
             self._save()
             return True
         if action == 'restart':
@@ -448,13 +489,20 @@ class QueueManager:
                 self.error_hold = False
             if self.active and self.intent:
                 raise DownloadError('Wait for the current stop operation to finish.')
+            if data.get('new_run') and self.active:
+                raise DownloadError('Finish or stop the current file before starting a new run.')
+            if not data.get('new_run') and self.policy.reason() in {'bytes', 'deadline', 'recovery'}:
+                raise DownloadError('This run reached its limit. Start new run explicitly to reset its time and byte budget.')
             for job in self.jobs:
                 if job.status == 'attention':
                     job.status, job.error = 'pending', ''
                     job.cycle_attempts = 0
-            if not self.running:
+            if not self.running or data.get('new_run'):
                 self.run_ids = {j.id for j in self.jobs if j.status == 'pending'}
                 self.running = bool(self.run_ids or self.active)
+            if self.running and (data.get('new_run') or not self.policy.record['open']):
+                self.policy.begin()
+                self._save()
             self.pause.clear()
             self.boundary = False
             self.acknowledged = False
@@ -536,6 +584,8 @@ class QueueManager:
                 self.pause.clear()
                 self.review_cancel.set()
                 self.review_requested.clear()
+                if action == 'cancel':
+                    self.policy.finish()
                 for job in self.jobs:
                     if job.id != self.active and job.status in HOLDS | {'pending', 'retry_wait'} and action == 'cancel':
                         self._discard(job)
@@ -565,7 +615,7 @@ class QueueManager:
                 if data['text'] == PAUSED_STATUS and self.pause.is_set() and not self.intent:
                     self.acknowledged = True
                     self.message = PAUSED_STATUS
-                elif not self.pause.is_set() and not self.intent and not self.boundary and data['text'] != PAUSED_STATUS:
+                elif not self.pause.is_set() and not self.intent and not self.boundary and not self.policy_hold and data['text'] != PAUSED_STATUS:
                     self.message = data['text']
             elif action == '_progress':
                 job.received = data['received']
@@ -638,14 +688,24 @@ class QueueManager:
         raise DownloadError('Unsupported queue action.')
 
     def _advance(self):
+        self.policy_hold = self.policy.reason()
+        if self.policy_hold and self.running and not self.pause.is_set() and not self.intent and not self.error_hold:
+            reason = {'schedule': 'Outside the daily download window', 'bytes': 'Run byte budget reached', 'deadline': 'Run deadline reached', 'recovery': 'Interrupted run: the last received-byte total is uncertain'}[self.policy_hold]
+            self.message = reason + ('. Finishing the current file, then holding.' if self.active else '. Waiting for the window.' if self.policy_hold == 'schedule' else '. Start new run to continue.')
         if self.closing or not self.running or self.active or self.pause.is_set():
             return
         job = next((j for j in self.jobs if j.status in {'pending', 'retry_wait'}), None)
         if not job:
             self.running = False
+            self.policy.finish()
+            self.policy_hold = ''
+            self._save()
             completed = sum(j.id in self.run_ids and j.status == 'completed' for j in self.jobs)
             failed = sum(j.id in self.run_ids and j.status == 'failed' for j in self.jobs)
             self.message = f'Queue finished: {completed} saved, {failed} failed.'
+            return
+        if self.policy_hold:
+            self._save()
             return
         if job.retry_due > time.time():
             job.status = 'retry_wait'
@@ -662,6 +722,8 @@ class QueueManager:
             self._save()
             return
         self.active = job.id
+        if job.run_id != self.policy.record['id']:
+            job.run_id, job.run_bytes = self.policy.record['id'], 0
         job.attempt += 1
         job.cycle_attempts += 1
         job.retry_due = 0
@@ -779,7 +841,8 @@ class QueueManager:
                         last[0] = now
                 if job.output_name:
                     video = replace(video, name=job.output_name)
-                value = str(client.download(video, job.folder, update, checkpoint=state))
+                policy = TransferPolicy(self.limiter, lambda amount: self.request('_bytes', job_id=job.id, attempt=job.attempt, amount=amount))
+                value = str(client.download(video, job.folder, update, checkpoint=state, policy=policy))
                 outcome = 'completed'
         except Cancelled:
             outcome, value = 'cancelled', 'The operation was cancelled.'
@@ -809,10 +872,14 @@ class QueueManager:
         received = sum(j.received for j in members)
         unknown = any(not j.video for j in members)
         speed = self.meter.rate_at(time.monotonic()) if current and current.video and not self.pause.is_set() and not self.intent else 0
+        held = bool(self.policy_hold and not self.active and self.running)
         return deepcopy({'jobs': [asdict(j) for j in self.jobs], 'preferences': self.preferences,
-                         'active': self.active, 'running': self.running, 'paused': self.pause.is_set(),
+                         'active': self.active, 'running': self.running, 'paused': self.pause.is_set() or held,
+                         'manual_paused': self.pause.is_set(), 'policy_hold': self.policy_hold,
+                         'run_options': self.policy.options, 'run_state': self.policy.record,
+                         'timezone': local_now().strftime('%Z (UTC%z)'),
                          'stopping': bool(self.intent) or bool(self.error_hold and self.active),
-                         'pause_acknowledged': self.acknowledged, 'closing': self.closing,
+                         'pause_acknowledged': self.acknowledged or held, 'closing': self.closing,
                          'pause_after': self.boundary, 'review_busy': bool(self.review_active or self.review_requested),
                          'review_space': self.review_space,
                          'message': self.message, 'speed': speed, 'received': received, 'total': total,

@@ -43,7 +43,8 @@
    after strict local and server validation.** If Tera shows **Restart required**,
    select the row and explicitly choose **Restart from zero**, then Start/Resume.
    Cancel queue deletes owned unfinished partials and marks pending items cancelled;
-   completed files are kept. Tray mode and schedules are not implemented yet.
+   completed files are kept. Daily windows work while Tera is running; tray mode
+   is not implemented yet.
 
 Repeated normalized inputs are discovered once while already in Review/Queue.
 Aliases are considered duplicates only when the provider reports matching share
@@ -62,6 +63,39 @@ last committed prefix for validated continuation after correction. Changing an
 owned partial's name/folder requires explicit Restart from zero first; partial
 files are not moved. Per-share folder names use a short identity hash, not a raw share
 code or password.
+
+## Run limits
+
+Use the **Run limits** tab and click **Apply limits**. Defaults are unlimited
+speed/time/bytes with scheduling off. Settings persist locally and can be changed
+during a run.
+
+- **Speed (KiB/s)** caps video data; zero removes the cap. Login/share requests
+  are outside this cap. Changes apply at the next read; an in-flight read can
+  finish first. Pause, Skip, Cancel and save/exit remain available while throttled.
+- **Daily window** uses the displayed Windows local timezone and 24-hour HH:MM.
+  Start is inclusive, end exclusive; overnight windows such as 22:00–06:00 work.
+  Start and end must differ. Start the queue to arm it outside the window; it
+  waits without transferring files. The window closing finishes the active file
+  before holding. Tera must stay running: no Windows task, autostart, wake-up or
+  power-setting change is installed. Reopening still requires an explicit Start.
+- **Run for (minutes)** creates a deadline from the run's original start. Pauses,
+  schedule waits and time while Tera is closed count toward it. The displayed
+  deadline and daily window follow the current Windows clock/timezone.
+- **Run budget (MiB)** counts newly received video bytes, including retransfers.
+  An existing resumed prefix is not charged again. Counts and deadlines survive
+  graceful save/exit; Resume and Apply limits do not reset them.
+- Time and byte limits **finish the current file**, so they can exceed the limit
+  by that file's remaining time/bytes. After a limit holds, choose **Start new
+  run** explicitly to reset its counters/deadline. Enlarging/disabling a reached
+  limit does not silently release it. New run keeps verified partial bytes;
+  **Restart from zero** is the separate action that discards a selected partial.
+
+Only a schedule hold releases automatically. Manual Pause, finish-current pause,
+login/storage/restart holds and reached run limits take precedence. Pause while
+waiting outside a window prevents automatic starting when it opens. An abrupt
+process crash can leave the last received-byte total uncertain; a byte-limited
+run then requires **Start new run** while retaining its verified partial bytes.
 
 TeraBox aliases from `terasharelink.com`, `terasharefile.com`, and
 `terafileshare.com` are accepted in both `/s/1…` and `sharing/link?surl=…`
@@ -137,7 +171,7 @@ Restart from zero even though the synthetic protocol checks pass. Rate
 limits, expired links, account limits, share restrictions and future TeraBox
 changes can still cause failures.
 
-Deliveries A-C verification passed **91 offline tests** and an isolated, withdrawn
+Deliveries A-D verification passed **111 offline tests** and an isolated, withdrawn
 native Tkinter smoke check on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. The checks
 covered encrypted storage, failed saves, backup/restore, process locking, queue
 edits, active-stream skip cleanup, history/retry, favorites, review/selection,
@@ -146,6 +180,11 @@ pause, byte-exact synthetic files, save/exit, held restoration and real isolated
 CLI startup/exit. New checks cover real loopback HTTP responses, hidden subprocess
 crashes during writing and before/after rename, verified continuation, corrupt
 checkpoints, failed saves, bounded retries and explicit Restart controls.
+The limits checks add fake-clock pacing/window/deadline boundaries, manual-hold
+precedence, retransfers and resumed-prefix accounting, settings failures and a
+crash with an uncertain byte total. A native combined scenario exercises cap
+changes, throttled pause/save/restore, schedule and retry interaction, boundary
+holds, byte-budget overrun, explicit New run and byte-exact files.
 The native check uses mocked login, provider and shell access;
 space exhaustion and write failures use deterministic offline fixtures. No real
 Firefox session or TeraBox download was used for this update.
@@ -176,5 +215,6 @@ personal-workflow improvements. Its [implementation checklist](tasks/todo.md)
 records completed deliveries and their local verification. Review/selection, duplicate/storage
 preflight and finish-current pause are implemented in Delivery B. Delivery C adds
 owned checkpoints, conservative continuation and bounded retries, with live
-provider resume still pending. Bandwidth/schedule/budget controls and
-tray/notifications remain pending in Deliveries D/E.
+provider resume still pending. Delivery D implements bandwidth caps, daily windows
+and per-run time/byte limits. Tray/notifications and the quiet launcher remain
+pending in Delivery E.

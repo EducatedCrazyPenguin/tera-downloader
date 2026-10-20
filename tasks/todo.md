@@ -1,12 +1,14 @@
 # Tera roadmap implementation checklist
 
-Status: Deliveries A-C implemented locally through 20 October 2026. T01-T12 and local checkpoints A1/A2/B/C passed the checks recorded below. Delivery C's live-provider gate and Deliveries D/E remain pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
+Status: Deliveries A-D implemented locally through 20 October 2026. T01-T15 and local checkpoints A1/A2/B/C/D passed the checks recorded below. Delivery C's live-provider gate and Delivery E remain pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
 
 **Evidence at the Delivery A checkpoint: 3/3 for that local scope — 47 offline tests and the isolated native Tkinter/real-entry-point smoke check passed on Python 3.12.10, Tk 8.6, and SQLite 3.49.1. B-E were then pending.**
 
 **Evidence at the Delivery B checkpoint: 3/3 for the tested local/synthetic scope — 65 offline tests and the integrated withdrawn native smoke passed in the same environment. C-E were then pending; real provider transfers and long-pause reliability remained unverified.**
 
-**Evidence: Delivery C 3/3 for the checked local protocol/runtime scope — 91 offline tests, bounded loopback HTTP, forced process crash/recovery and the withdrawn native recovery flow passed. Whole-product evidence remains 2/3; live provider resume, power loss, large real files and D/E remain unverified.**
+**Evidence at the Delivery C checkpoint: 3/3 for the checked local protocol/runtime scope — 91 offline tests, bounded loopback HTTP, forced process crash/recovery and the withdrawn native recovery flow passed. D/E were then pending; provider resume, power loss and large real files remained unverified.**
+
+**Evidence: Delivery D 3/3 for the checked local scope — 111 offline tests and the combined withdrawn native limits/recovery scenario passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Whole-product evidence remains 2/3; live provider compatibility, large real transfers, power loss and E remain unverified.**
 
 ## Delivery A — Queue, persistence, and everyday use
 
@@ -97,25 +99,25 @@ Status: Deliveries A-C implemented locally through 20 October 2026. T01-T12 and 
 
 ## Delivery D — Bandwidth, schedules, and run limits
 
-- [ ] T13 — Add an adjustable bandwidth cap.
+- [x] T13 — Add an adjustable bandwidth cap.
   - Acceptance: unlimited by default; cap changes during a run; pacing remains responsive to pause/skip/cancel/save-exit and does not block Tkinter.
   - Verify: deterministic fake-clock byte pacing, low-cap chunk bounds, and native controls during throttle waits.
   - Likely files: `run_policy.py`, `test_run_policy.py`, `terabox.py`, `test_terabox.py`, `smoke_terabox_gui.py`.
   - Dependencies: T06/T09/T12. Scope: medium.
 
-- [ ] T14 — Add daily schedule windows.
+- [x] T14 — Add daily schedule windows.
   - Acceptance: visible local timezone, overnight support, safe reevaluation after sleep/clock changes; only schedule holds auto-resume; scheduling only while Tera is running, without Windows tasks or autostart.
   - Verify: fake-clock boundaries, overnight windows, manual-hold precedence, restored held jobs, and retry/schedule interaction.
   - Likely files: `run_policy.py`, `test_run_policy.py`, `queue_manager.py`, `terabox.py`, `smoke_terabox_gui.py`.
   - Dependencies: T09/T12/T13. Scope: medium.
 
-- [ ] T15 — Add per-run deadline and byte-budget boundary stops.
+- [x] T15 — Add per-run deadline and byte-budget boundary stops.
   - Acceptance: finish-current semantics are explicit; retransfers count, resumed prefixes do not; manual pause does not reset budgets; exceeded limits never silently resume on a schedule.
   - Verify: fake-clock/byte accounting at mid-file and job boundaries, overshoot disclosure, and precedence with manual holds/retries.
   - Likely files: `run_policy.py`, `test_run_policy.py`, `queue_manager.py`, `terabox.py`, `smoke_terabox_gui.py`.
   - Dependencies: T06/T09/T14. Scope: medium.
 
-- [ ] Checkpoint D — One synthetic scenario combines cap, schedule, boundary pause, retry, budget, and save/restore; all waits remain cancellable.
+- [x] Checkpoint D — One synthetic scenario combines cap, schedule, boundary pause, retry, budget, and save/restore; all waits remain cancellable.
 
 ## Delivery E — Quiet desktop use and release checks
 
@@ -159,3 +161,12 @@ No automatic task below authorizes real Firefox cookie checks, live downloads, v
 - All 91 offline tests passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1 with workspace temporary folders. The local socket restriction (`WinError 10013`) required an elevated test run for the owned 127.0.0.1 HTTP fixture. Hidden bounded subprocesses recorded their PIDs and exited at a synced body checkpoint and immediately before/after rename; all three restored exact synthetic files. This is process-crash evidence, not a power-loss test.
 - The native withdrawn smoke verifies saved partial bytes, a real Range request through the synthetic client, bounded recovery, a rejected 200 response, disabled Resume until explicit Restart, exact completed output and clean teardown, alongside the A/B workflow. Login and shell actions remain mocked; no real profile or provider was used. A deliberate removal of the ETag guard was detected by its focused regression and the original source restored.
 - The live-provider gate stays unchecked. No TeraBox Range/strong-validator stability, refreshed live URL, long real pause, full large-file transfer or installed package was verified. D/E remain pending. The A/B restart-from-zero statements above describe those historical checkpoints and are superseded by this conditional recovery behavior.
+
+## Delivery D verification record — 20 October 2026
+
+- `run_policy.py` adds validated persisted options, a monotonic file-body limiter, local daily/overnight windows and a persisted run identity/start/received-byte total/latched limit reason. Settings stay in the existing atomic preferences; per-job run-byte receipts use the existing SQLite payload. No schema migration or dependency was added.
+- Transfer reads shrink with a low cap and throttle waits poll cancellation/pause. Actual body bytes are counted before writing, including retransfers; resumed prefixes are not charged. Paused checkpoints update displayed progress even if progress messages were coalesced. Storage errors in throttle/checkpoint checks remain storage failures, not transient network retries.
+- Schedule and run holds remain separate from the manual pause event. Window closure and limits finish the active file; only schedule holds release automatically. Explicit Start new run resets limits, while Resume and Apply preserve counters and latched holds. The run clock includes pauses, window waits and exit time. Restored work never starts automatically; a byte-limited process crash conservatively requires a new run for uncertain byte accounting without discarding a verified prefix.
+- 111 offline tests passed, including fake-clock exact budget/deadline and overnight/timezone boundaries, bounded pacing/read sizes, cap changes, manual hold precedence, retry and restart byte accounting, clear-history continuity, failed hot-settings saves, throttled Skip/Cancel, saved run restoration and a hidden byte-budget crash test. A mutation weakening the exact budget boundary was detected and the original source restored.
+- The withdrawn native scenario combines a closed window, manual pause across opening, hot cap change, throttled pause and save/exit, restoration without requests, validated continuation, finish-current pause, window closure, a bounded retry held outside its window, manual retry hold, byte-budget overrun and explicit New run. All outputs were byte-exact, controls reset and owned instances closed cleanly; the original A-C/real-entry-point smoke still passes.
+- Runtime checks used temporary synthetic data, mocked login/provider/shell access and no live downloads. The full offline suite's owned loopback fixture required the previously established local-socket permission. No Windows task, wake-up, system-setting change, background service, installation or optional desktop dependency was introduced. E and the live-provider gate remain pending.

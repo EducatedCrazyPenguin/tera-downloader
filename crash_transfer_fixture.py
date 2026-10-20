@@ -14,7 +14,7 @@ def main():
     print(f'Owned crash fixture PID {os.getpid()}; stage {stage}', flush=True)
     Client.gate.set()
     class CrashClient(Client):
-        def download(self, video, folder, progress, *, checkpoint=None):
+        def download(self, video, folder, progress, *, checkpoint=None, policy=None):
             original_commit, original_finalize = checkpoint.commit, checkpoint.finalize
             def commit(value):
                 result = original_commit(value)
@@ -28,9 +28,11 @@ def main():
                 if stage == 'after_rename': os._exit(25)
                 return result
             checkpoint.commit, checkpoint.finalize = commit, finalize
-            return super().download(video, folder, progress, checkpoint=checkpoint)
+            return super().download(video, folder, progress, checkpoint=checkpoint, policy=policy)
     manager = QueueManager(directory / 'state', CrashClient)
     assert manager.ready.wait(3) and not manager.startup_error
+    if '--budget' in sys.argv[3:]:
+        manager.request('configure_run', options={'byte_budget': 10 * 1024 * 1024})
     manager.request('review', links=['https://terabox.com/s/1synthetic'], folder=str(directory / 'videos'), profile=None)
     deadline = time.monotonic() + 6
     while time.monotonic() < deadline:

@@ -29,6 +29,26 @@ class EntryTests(unittest.TestCase):
         view.snapshot['jobs'][0]['profile'] = None
         self.assertIsNone(TeraApp.login_profile(view))
 
+    def test_run_limit_fields_convert_units_and_reject_invalid_input(self):
+        view = Mock()
+        view.limit_speed.get.return_value = '1.5'
+        view.limit_bytes.get.return_value = '2.25'
+        view.limit_minutes.get.return_value = '30'
+        view.window_start.get.return_value = '22:00'
+        view.window_end.get.return_value = '06:00'
+        view.window_enabled.get.return_value = True
+        TeraApp.apply_limits(view)
+        options = view.send.call_args.kwargs['options']
+        self.assertEqual(options['speed_bps'], 1536)
+        self.assertEqual(options['byte_budget'], 2359296)
+        self.assertEqual(options['deadline_minutes'], 30)
+        self.assertTrue(options['schedule_enabled'])
+        for speed in ('-1', 'inf', 'nan'):
+            view.send.reset_mock()
+            view.limit_speed.get.return_value = speed
+            TeraApp.apply_limits(view)
+            view.send.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

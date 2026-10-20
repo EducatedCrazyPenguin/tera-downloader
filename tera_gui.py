@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
+import math
 import os
 import queue
 import threading
@@ -13,6 +15,7 @@ from app_state import default_data_dir
 from firefox_session import FirefoxProfile, SessionError, profiles
 from queue_manager import QueueManager, TERMINAL, REVIEW, HOLDS
 from terabox import DownloadError, TeraBox, open_firefox, parse_links
+from run_policy import validate_options
 
 
 def size_text(value):
@@ -109,6 +112,31 @@ class TeraApp:
         queue_page, history_page = ttk.Frame(notebook), ttk.Frame(notebook)
         notebook.add(queue_page, text='Queue')
         notebook.add(history_page, text='History')
+        self.limits_page = ttk.Frame(notebook, padding=10)
+        notebook.add(self.limits_page, text='Run limits')
+        self.timezone_text = tk.StringVar(value='Windows local time')
+        ttk.Label(self.limits_page, textvariable=self.timezone_text).grid(row=0, column=0, columnspan=4, sticky='w', pady=(0, 8))
+        self.limit_speed = tk.StringVar(value='0')
+        self.limit_minutes = tk.StringVar(value='0')
+        self.limit_bytes = tk.StringVar(value='0')
+        self.window_start = tk.StringVar(value='00:00')
+        self.window_end = tk.StringVar(value='00:00')
+        self.window_enabled = tk.BooleanVar(value=False)
+        self.limit_entries = []
+        for row, column, label, variable in ((1, 0, 'Speed (KiB/s)', self.limit_speed), (1, 2, 'Run for (minutes)', self.limit_minutes),
+                                              (2, 0, 'Run budget (MiB)', self.limit_bytes), (3, 0, 'Window start (HH:MM)', self.window_start),
+                                              (3, 2, 'Window end (HH:MM)', self.window_end)):
+            ttk.Label(self.limits_page, text=label).grid(row=row, column=column, sticky='w', padx=(0, 6), pady=4)
+            entry = ttk.Entry(self.limits_page, textvariable=variable, width=13)
+            entry.grid(row=row, column=column + 1, sticky='w', padx=(0, 18))
+            self.limit_entries.append(entry)
+        self.window_check = ttk.Checkbutton(self.limits_page, text='Enable daily window (overnight supported)', variable=self.window_enabled)
+        self.window_check.grid(row=2, column=2, columnspan=2, sticky='w')
+        self.apply_limits_button = ttk.Button(self.limits_page, text='Apply limits', command=self.apply_limits)
+        self.apply_limits_button.grid(row=4, column=0, sticky='w', pady=8)
+        ttk.Label(self.limits_page, text='Zero means unlimited. Limits finish the current file and can overrun by its remaining bytes/time.\nThe run clock includes pauses, window waits and exit time. Only schedule holds auto-resume.', wraplength=720).grid(row=4, column=1, columnspan=3, sticky='w')
+        self.run_summary = tk.StringVar(value='No run started')
+        ttk.Label(self.limits_page, textvariable=self.run_summary, wraplength=920).grid(row=5, column=0, columnspan=4, sticky='w')
         self.review_tree = self._tree(self.review_page, ('chosen', 'name', 'size', 'folder', 'detail'),
                                       ('Download', 'Video', 'Size', 'Destination', 'Review / duplicate check'))
         self.review_tree.column('chosen', width=85, stretch=False)
@@ -171,7 +199,8 @@ class TeraApp:
         self.boundary_button = ttk.Button(actions, text='Finish current, then pause', command=lambda: self.send('pause_after'))
         self.skip_button = ttk.Button(actions, text='Skip', command=self.skip_selected)
         self.cancel_button = ttk.Button(actions, text='Cancel queue', command=lambda: self.send('cancel'))
-        for button in (self.start_button, self.pause_button, self.boundary_button, self.skip_button, self.cancel_button):
+        self.new_run_button = ttk.Button(actions, text='Start new run', command=lambda: self.send('start', new_run=True))
+        for button in (self.start_button, self.pause_button, self.boundary_button, self.skip_button, self.cancel_button, self.new_run_button):
             button.pack(side='left', padx=(0, 6))
         ttk.Label(frame, text='Closing saves verified partial bytes. Continuation requires server validation; live TeraBox resume is unverified.', foreground='#555555', wraplength=950).pack(anchor='w', pady=(8, 0))
         root.protocol('WM_DELETE_WINDOW', self.close)
@@ -379,6 +408,20 @@ class TeraApp:
         self.send('pause')
         self.status.set('Pausing… waiting for the current network request.')
 
+    def apply_limits(self):
+        try:
+            speed, budget = float(self.limit_speed.get()), float(self.limit_bytes.get())
+            if not all(math.isfinite(value) and value >= 0 for value in (speed, budget)):
+                raise ValueError('Speed and byte limits must be non-negative finite numbers.')
+            options = validate_options({'speed_bps': max(1, int(speed * 1024)) if speed else 0,
+                                        'deadline_minutes': int(self.limit_minutes.get()),
+                                        'byte_budget': max(1, int(budget * 1024 * 1024)) if budget else 0,
+                                        'schedule_enabled': self.window_enabled.get(),
+                                        'start': self.window_start.get().strip(), 'end': self.window_end.get().strip()})
+            self.send('configure_run', options=options)
+        except (ValueError, OverflowError) as error:
+            self.status.set(str(error) if str(error) else 'Enter valid limits and HH:MM window times.')
+
     def configure_controls(self):
         snapshot = self.snapshot or {}
         available = self.initialized and not self.closing and not self.manager.closed.is_set()
@@ -398,11 +441,16 @@ class TeraApp:
             for widget in (self.login_button, self.check_button):
                 enabled(widget, available and not discovering and not self.login_busy)
         pending = any(j['status'] in {'pending', 'attention'} for j in snapshot.get('jobs', []))
-        self.start_button.configure(text='Resume' if snapshot.get('paused') else 'Start queue')
+        limit_hold = snapshot.get('policy_hold') in {'bytes', 'deadline', 'recovery'}
+        manual = snapshot.get('manual_paused', False)
+        self.start_button.configure(text='Resume' if manual else 'Waiting for window' if snapshot.get('policy_hold') == 'schedule' and working else 'Start queue')
         unresolved = any(j['status'] in {'restart', 'login'} for j in snapshot.get('jobs', []))
-        enabled(self.start_button, available and not unresolved and not self.login_busy and not snapshot.get('stopping') and (snapshot.get('paused') or not working and pending))
-        enabled(self.pause_button, available and bool(working) and not snapshot.get('paused'))
-        enabled(self.boundary_button, available and bool(working) and not snapshot.get('paused') and not snapshot.get('pause_after'))
+        enabled(self.start_button, available and not limit_hold and not unresolved and not self.login_busy and not snapshot.get('stopping') and (manual or not working and pending))
+        enabled(self.pause_button, available and bool(working) and not manual)
+        enabled(self.boundary_button, available and bool(working) and not manual and not snapshot.get('pause_after'))
+        enabled(self.new_run_button, available and pending and not unresolved and not snapshot.get('active') and not self.login_busy and not snapshot.get('stopping'))
+        for widget in (self.apply_limits_button, self.window_check, *self.limit_entries):
+            enabled(widget, available)
         enabled(self.skip_button, available and (bool(snapshot.get('active')) or any(j['status'] in HOLDS | {'retry_wait'} for j in snapshot.get('jobs', []))))
         enabled(self.cancel_button, available and bool(working or discovering))
         enabled(self.download_button, available and not self.login_busy and any(j['status'] == 'review' for j in snapshot.get('jobs', [])))
@@ -470,6 +518,10 @@ class TeraApp:
         suffix = ' · more sizes pending discovery' if self.snapshot['unknown'] else ''
         self.dashboard.set(f"{size_text(received)} / {size_text(total)} · {size_text(self.snapshot['speed'])}/s · ETA {duration_text(self.snapshot['eta'])}{suffix}")
         self.favorite_box.configure(values=[f['name'] for f in self.snapshot['preferences'].get('favorites', [])])
+        self.timezone_text.set('Windows local time: ' + self.snapshot['timezone'] + ' · Tera must stay running for schedules.')
+        run, options = self.snapshot['run_state'], self.snapshot['run_options']
+        deadline = datetime.fromtimestamp(run['started'] + options['deadline_minutes'] * 60).astimezone().strftime('%d %b %H:%M %Z') if run['id'] and options['deadline_minutes'] else 'none'
+        self.run_summary.set(f"This run received {size_text(run['bytes'])} · Deadline: {deadline} · Hold: {self.snapshot['policy_hold'] or 'none'}")
         self.configure_controls()
 
     def poll(self):
@@ -498,6 +550,13 @@ class TeraApp:
                                       if profile and str(profile.path) == configured),
                                     'No login' if configured is None else next(iter(list(self.profile_options)[1:]), 'No login')))
                 self.login_status.set('Select Firefox to reuse its TeraBox login. Cookies are never saved here.')
+                options = latest['run_options']
+                self.limit_speed.set(f"{options['speed_bps'] / 1024:.17g}")
+                self.limit_bytes.set(f"{options['byte_budget'] / (1024 * 1024):.17g}")
+                self.limit_minutes.set(str(options['deadline_minutes']))
+                self.window_start.set(options['start'])
+                self.window_end.set(options['end'])
+                self.window_enabled.set(options['schedule_enabled'])
                 self.initialized = True
             self.status.set(latest['message'])
             self.render()

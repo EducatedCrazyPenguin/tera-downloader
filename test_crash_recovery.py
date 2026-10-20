@@ -37,3 +37,19 @@ class CrashRecoveryTests(QueueFixture):
                 self.assertFalse(path.exists())
                 self.stop(self.manager)
                 self.folder = previous
+
+    def test_interrupted_byte_limited_run_requires_new_run_for_uncertain_accounting(self):
+        self.stop(self.manager)
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name('crash_transfer_fixture.py')), str(self.folder), 'body', '--budget'],
+                                capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        self.assertEqual(result.returncode, 23, result.stderr.decode(errors='replace'))
+        print(result.stdout.decode().strip())
+        self.manager = self.make_manager()
+        restored = self.manager.request('snapshot')
+        self.assertEqual(restored['policy_hold'], 'recovery')
+        from app_state import StateError
+        with self.assertRaises(StateError): self.manager.request('start')
+        Client.gate.set()
+        self.manager.request('start', new_run=True)
+        done = self.wait(lambda s: s['jobs'][0]['status'] == 'completed')
+        self.assertEqual(done['run_state']['bytes'], len(BODY) - restored['jobs'][0]['received'])

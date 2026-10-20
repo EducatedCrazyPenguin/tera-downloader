@@ -279,10 +279,10 @@ class TeraBox:
             raise DownloadError('TeraBox returned no original-file URL. No preview was saved.')
         return validate_url(direct)
 
-    def download(self, video, folder, progress=lambda received, total: None, *, checkpoint=None):
+    def download(self, video, folder, progress=lambda received, total: None, *, checkpoint=None, policy=None):
         if checkpoint is not None:
             from transfer_state import download
-            return download(self, video, folder, progress, checkpoint)
+            return download(self, video, folder, progress, checkpoint, policy)
         self.check_cancel()
         if video.size <= 0:
             raise DownloadError('TeraBox did not report a file size, so completeness cannot be verified.')
@@ -310,9 +310,11 @@ class TeraBox:
                         raise DownloadError('The download size differs from the original file. Download stopped.')
                     while True:
                         self.check_cancel()
-                        chunk = response.read(1024 * 256)
+                        chunk = response.read(policy.before_read(self) if policy else 1024 * 256)
                         if not chunk:
                             break
+                        if policy:
+                            policy.received(len(chunk))
                         received += len(chunk)
                         if received > video.size:
                             raise DownloadError('The response exceeded the expected file size.')

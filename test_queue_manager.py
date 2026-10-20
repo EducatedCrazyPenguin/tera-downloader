@@ -34,13 +34,13 @@ class Client(TeraBox):
         return [Video(name + '.mp4', 5, name, 'https://terabox.com/synthetic')
                 for name in ('first', 'second', 'third')]
 
-    def download(self, video, folder, progress, *, checkpoint=None):
+    def download(self, video, folder, progress, *, checkpoint=None, policy=None):
         self.calls.append(('download', video.fid))
         while not self.release.wait(.01):
             self.check_cancel()
         if video.fid in self.fail:
             raise DownloadError('Synthetic file unavailable.')
-        return super().download(video, folder, progress, checkpoint=checkpoint)
+        return super().download(video, folder, progress, checkpoint=checkpoint, policy=policy)
 
     def open(self, *args, **kwargs):
         self.check_cancel()
@@ -223,7 +223,7 @@ class QueueTests(unittest.TestCase):
     def test_skip_inside_real_stream_cleans_partial_and_runs_next_file(self):
         started = threading.Event()
         class StreamingClient(Client):
-            def download(self, video, folder, progress, *, checkpoint=None):
+            def download(self, video, folder, progress, *, checkpoint=None, policy=None):
                 def update(received, total):
                     progress(received, total)
                     if video.fid == 'first':
@@ -231,7 +231,7 @@ class QueueTests(unittest.TestCase):
                         while not self.cancel.wait(.01):
                             self.check_cancel()
                         self.check_cancel()
-                return TeraBox.download(self, video, folder, update, checkpoint=checkpoint)
+                return TeraBox.download(self, video, folder, update, checkpoint=checkpoint, policy=policy)
         self.stop_manager(self.manager)
         self.manager = self.make_manager(StreamingClient)
         self.manager.request('add', links=[LINK], folder=str(self.folder / 'videos'), profile=None)

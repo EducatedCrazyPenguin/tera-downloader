@@ -153,6 +153,12 @@ class TransferStateTests(unittest.TestCase):
             Client(Response(BODY)).download(self.video, self.folder, checkpoint=self.state())
         self.assertEqual(target.read_bytes(), b'foreign file')
 
+    def test_storage_error_during_throttle_check_is_not_a_network_retry(self):
+        class Policy:
+            def before_read(self, client, check): raise PermissionError('Synthetic checkpoint flush failure')
+        with self.assertRaises(PermissionError):
+            Client(Response(BODY)).download(self.video, self.folder, checkpoint=self.state(), policy=Policy())
+
     def test_corrupt_binding_token_offset_and_failed_commit_preserve_files(self):
         original = deepcopy(self.saved)
         for key, value in [('token', '../escape'), ('binding', 'other'), ('offset', -1), ('offset', len(BODY) + 1), ('phase', 'other')]:

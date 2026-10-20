@@ -169,7 +169,7 @@ def validate_response(response, offset, size, etag):
     return strong_etag(headers.get('ETag', ''))
 
 
-def download(client, video, folder, progress, state):
+def download(client, video, folder, progress, state, policy=None):
     state.check = client.check_cancel
     output = None
     received = state.record['offset']
@@ -201,16 +201,21 @@ def download(client, video, folder, progress, state):
         with response:
             etag = validate_response(response, received, video.size, etag)
             last_sync, last_time = received, time.monotonic()
-            while True:
+            def check():
                 if client.pause is not None and client.pause.is_set() and received != state.record['offset']:
                     state.sync(output, state.hasher, received, etag)
                 client.check_cancel()
+            while True:
+                check()
+                read_size = policy.before_read(client, check) if policy else 256 * 1024
                 try:
-                    chunk = response.read(256 * 1024)
+                    chunk = response.read(read_size)
                 except (http.client.HTTPException, TimeoutError, OSError):
                     raise DownloadError('The connection was interrupted; verified partial bytes were kept.', kind='transient') from None
                 if not chunk:
                     break
+                if policy:
+                    policy.received(len(chunk))
                 if received + len(chunk) > video.size:
                     raise DownloadError('The response exceeded the expected size.', kind='integrity')
                 output.write(chunk)
