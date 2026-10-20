@@ -2,7 +2,9 @@
 
 ## Use it
 
-1. Double-click **Start Tera.cmd** on Windows (Python 3.10+ with Tkinter).
+1. Double-click **Start Tera.pyw** on Windows (Python 3.10+ with Tkinter and
+   the normal Python `.pyw` association). This opens Tera without a command window.
+   **Start Tera.cmd** remains the explicit console/diagnostic fallback.
 2. Select your usual **Firefox profile**. Use **Login in Firefox** to open your
    share and sign into TeraBox in a normal tab; **Check login** verifies it.
 3. Paste share links one per line or separated by commas, choose a destination,
@@ -43,8 +45,53 @@
    after strict local and server validation.** If Tera shows **Restart required**,
    select the row and explicitly choose **Restart from zero**, then Start/Resume.
    Cancel queue deletes owned unfinished partials and marks pending items cancelled;
-   completed files are kept. Daily windows work while Tera is running; tray mode
-   is not implemented yet.
+   completed files are kept. **Minimize to tray** is a separate action; daily
+   windows also work while Tera stays running in the tray.
+
+## Quiet desktop use
+
+The base app needs no third-party packages. Optional tray support uses pinned
+Windows packages in a project-local environment (Python **3.11+** for these extras):
+
+```powershell
+python -m venv .venv-desktop
+.\.venv-desktop\Scripts\python.exe -m pip install --only-binary=:all: -r requirements-desktop.txt
+```
+
+**Start Tera.pyw** automatically uses that environment when it exists, handing
+off before opening the queue store. Without the extras, Tera still opens and
+downloads normally; tray and notification controls are disabled with an inline
+explanation. A broken environment can be renamed or removed after exiting Tera;
+this does not remove the separate queue/settings or downloaded files. To diagnose
+with the optional packages, run `.\.venv-desktop\Scripts\python.exe terabox.py`.
+
+- **Minimize to tray** hides Tera only after Windows accepts its icon. Use
+  **Show Tera** (or the icon's default action) to restore it. Its menu offers
+  Pause, Resume/Start, Cancel, and **Save queue and exit**, using the same controls
+  as the window. Windows may place the icon in the notification-area overflow.
+  A startup/backend-loop failure keeps/restores the window. X always saves and exits.
+- **Notify on completion or action needed** defaults off. Enabling it also
+  starts the tray icon while leaving the window visible. Notifications cover
+  queue completion, download failures/required actions and reached run limits.
+  They contain generic text only, without filenames, folders, source links or
+  account details. Repeated polls do not repeat an outcome. Restored history,
+  manual pauses and daily-window holds are quiet. Windows notification settings
+  can suppress delivery; the app's status remains authoritative.
+- Disabling notifications stops new messages; an already displayed Windows
+  notification may remain. The icon stays available until exit. Nothing starts
+  Tera at Windows login, wakes the computer or prevents sleep.
+- Quiet-launch diagnostics are local: `launcher.log` beside the queue data
+  (`%LOCALAPPDATA%\Tera`, or `--data-dir`). They record fixed startup/exit/error
+  codes and process IDs, without exception text, tracebacks or source data. At
+  64 KiB the next entry rotates one previous log. If no window appears, inspect
+  that log or use the diagnostic launcher. A callback failure records
+  `callback_failed`; restarting after save/exit is the recovery action.
+
+The extras are [pystray 0.19.5](https://pypi.org/project/pystray/0.19.5/)
+(LGPLv3), [Pillow 13.0.0](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html)
+(MIT-CMU), and six 1.17.0 (MIT). They are optional and installed from wheels;
+their license notices remain in the environment. The Windows threading/lifecycle
+integration follows [pystray's usage guidance](https://pystray.readthedocs.io/en/latest/usage.html).
 
 Repeated normalized inputs are discovered once while already in Review/Queue.
 Aliases are considered duplicates only when the provider reports matching share
@@ -171,7 +218,7 @@ Restart from zero even though the synthetic protocol checks pass. Rate
 limits, expired links, account limits, share restrictions and future TeraBox
 changes can still cause failures.
 
-Deliveries A-D verification passed **111 offline tests** and an isolated, withdrawn
+Deliveries A-E verification passed **128 offline tests** and an isolated, withdrawn
 native Tkinter smoke check on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. The checks
 covered encrypted storage, failed saves, backup/restore, process locking, queue
 edits, active-stream skip cleanup, history/retry, favorites, review/selection,
@@ -193,6 +240,36 @@ local-network permission. Forced process crashes were tested; power loss was not
 **Evidence: 2/3 — Local queue/UI behavior is directly tested; live-provider
 compatibility and full large-file transfer remain unverified.**
 
+Delivery E additionally checked a real Windows tray lifecycle with intercepted
+notifications: registration before hiding, restore, pause/resume, Cancel/reset,
+save/exit, byte-exact output, and rejected registration leaving the window
+accessible. The actual `.pyw` launcher handed off to project-local `pythonw`,
+held a single queue-data lock and saved/exited on its owned WM_CLOSE. All owned
+windows/processes exited. Offline checks cover missing/startup-failed backends,
+notification opt-in/deduplication, preferences, safe failure logs and log rotation.
+The sandbox rejected a Windows tray message-filter call, so the native tray test
+used the approved unsandboxed context. The original queue/recovery/run-limit
+Tkinter smoke still passed with optional packages absent from its interpreter.
+Real notification banners, Explorer restarts, sleep/resume and installed shortcut
+launch were not exercised. No Tera desktop shortcut or installer was found;
+this is a source-launcher release, not a packaged installation.
+
+## Backup and rollback
+
+Exit Tera before copying its **whole** data directory and any owned partial files
+in download folders. Keep them with the same Windows account; DPAPI-protected
+links are not a portable account backup. Never copy only an active SQLite main
+file as a backup. The state module also offers SQLite's online backup API for
+queue snapshots; a full recovery needs the preferences and partials as well.
+Existing legacy settings and completed videos are not migrated or deleted.
+
+These deliveries keep schema version 1. To roll back, preserve the current data
+first and restore a matching code/data backup together. Older download code may
+not understand newer checkpoint or run-limit payloads despite sharing the schema
+version; do not run the pre-roadmap app against the current live store. Corrupt
+or unsupported state is refused instead of silently reset. No rollback or
+restore command runs automatically.
+
 The app does not silently retry anonymously when the selected Firefox session
 fails validation. TeraBox's own download restrictions still apply.
 
@@ -203,6 +280,7 @@ python terabox.py --check "YOUR_TERABOX_LINK" --firefox
 python terabox.py --check "YOUR_TERABOX_LINK" --firefox --profile default-release
 python -m unittest -v
 python smoke_terabox_gui.py  # Withdrawn Tkinter window; synthetic downloads only.
+.\.venv-desktop\Scripts\python.exe smoke_desktop.py  # Explicit native check; may show its owned window.
 python terabox.py --data-dir "C:\path\to\isolated-tera-state"
 ```
 
@@ -216,5 +294,6 @@ records completed deliveries and their local verification. Review/selection, dup
 preflight and finish-current pause are implemented in Delivery B. Delivery C adds
 owned checkpoints, conservative continuation and bounded retries, with live
 provider resume still pending. Delivery D implements bandwidth caps, daily windows
-and per-run time/byte limits. Tray/notifications and the quiet launcher remain
-pending in Delivery E.
+and per-run time/byte limits. Delivery E adds the optional tray, generic opt-in
+notifications and quiet launcher. All five local delivery checkpoints are
+complete; live-provider and large-file verification remain separate gates.

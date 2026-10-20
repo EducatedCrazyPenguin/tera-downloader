@@ -452,8 +452,10 @@ class QueueManager:
             return [job.id for job in added]
         if action == 'preferences':
             changes = data['changes']
-            if not set(changes) <= {'firefox_profile', 'last_destination', 'favorites'}:
+            if not set(changes) <= {'firefox_profile', 'last_destination', 'favorites', 'notifications'}:
                 raise DownloadError('Unsupported preference.')
+            if 'notifications' in changes and not isinstance(changes['notifications'], bool):
+                raise DownloadError('Notifications must be on or off.')
             if 'firefox_profile' in changes and changes['firefox_profile'] is not None and not isinstance(changes['firefox_profile'], str):
                 raise DownloadError('Select a valid Firefox profile.')
             if 'last_destination' in changes and not isinstance(changes['last_destination'], str):

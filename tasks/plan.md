@@ -1,6 +1,6 @@
 # Tera product roadmap and incorporation plan
 
-Date: 19 October 2026. Status: approved roadmap; Delivery A implemented locally, Deliveries B-E pending.
+Date: 19 October 2026; updated 20 October 2026. Status: approved roadmap; Deliveries A-E implemented locally. Live-provider verification remains pending.
 
 ## Outcome and scope
 
@@ -8,7 +8,7 @@ Turn the current Windows/Tkinter downloader into a dependable tool for heavy dow
 
 The capability map and build order below are the reviewable design proposal. They are not claims that these features already exist. Implementation tasks and acceptance checks live only in [todo.md](todo.md); do not create duplicate feature plans or a separate specification for each small preference.
 
-**Evidence: 2/3 — The integration points were checked against commit `96d766b` and current source on 19 October 2026. Platform documentation supports the proposed mechanisms; TeraBox range/validator behavior and tray integration remain untested; Delivery A persistence has local offline/native coverage. Baseline verification covered 24 offline tests; current Delivery A verification is recorded at the end of this plan.**
+**Evidence: 2/3 — All five local deliveries have offline/native evidence, recorded below: 128 offline tests and the queue/recovery/limits and Windows tray/quiet-launcher checks pass on Python 3.12.10. Live TeraBox range/validator behavior, large real transfers and real notification delivery remain unverified. The capability map below records the approved design; delivery records establish what was implemented and tested.**
 
 > 🧠 **From Hindsight memory (Pause and resume active Tera downloads)** — Existing Pause/Resume preserves the current stream, partial bytes, and queue position only while Tera stays open. Restart recovery and automatic reconnection were excluded from that earlier feature. Current source confirms these boundaries; this roadmap deliberately proposes extending them.
 
@@ -105,7 +105,7 @@ Build order: stable queue identities -> local-state -> editable queue/history/da
 
 - Quiet mode is the default: inline validation/errors; no sounds, automatic Explorer/video launches, Firefox launches, global keystrokes, clipboard monitoring, or attention-stealing completion dialogs. Login in Firefox and Reveal folder remain explicit user actions.
 - Per the confirmed user preference, window X means Save queue and exit. Minimize to tray is a separate explicit action; do not hide the window unless a working tray icon exists. Tray commands feed the same queue command channel as Tkinter. Exit from the tray uses the same orderly save/exit path.
-- Use a narrow optional Windows tray integration based on `pystray`/Pillow instead of hand-maintaining a Win32 message loop. These packages are not installed in the inspected interpreter. Keep them behind a desktop extra, pin reviewed compatible versions during implementation, and test in a project-local environment; ordinary downloading must still work if the optional integration is absent.
+- Use a narrow optional Windows tray integration based on `pystray`/Pillow instead of hand-maintaining a Win32 message loop. Delivery E pins them in `requirements-desktop.txt` and verifies a project-local `.venv-desktop`; the base interpreter remains dependency-free. Ordinary downloading still works without the optional integration.
 - Tray notifications are opt-in and contain generic completion/action-needed summaries, not private share URLs or filenames. Deduplicate repeated failures; queue/schedule polls never produce repeated popups. A missing tray backend disables the tray action visibly and keeps the window accessible.
 - Add a quiet `pythonw`/`.pyw` launch path with safe local diagnostic logging. Keep `Start Tera.cmd` as the explicit diagnostic fallback. No Windows login autostart, automatic app launch, or persistent service is included by default.
 
@@ -131,7 +131,7 @@ Review the capability boundaries before implementation and review each completed
 - Verify tray, notifications, and the quiet launcher in a bounded isolated Windows instance. Native visible testing, if necessary, needs advance notice and the existing standing conditions; never attach to the user's app or profile. Do not test real Firefox login/downloads without an explicit request.
 - Before any migration, use SQLite backup or an atomic JSON backup as appropriate and prove restore. Keep old preference data and existing downloads intact. Rollback must refuse unknown new state safely rather than erase it.
 - No dedicated installer/build pipeline was found in this source project. Validate the source launchers; if packaging or an existing daily-use shortcut becomes part of a later release, follow the desktop release agreement and distinguish source, native, and installed verification.
-- Main unknowns: provider support for strong validated range resume; stable validators across refreshed URLs; actual tray/notification behavior in the user's Windows environment. Do not represent these as verified capabilities.
+- Main unknowns: provider support for strong validated range resume; stable validators across refreshed URLs; real Windows notification delivery, Explorer restart and sleep/resume. The isolated Windows tray/quiet-launcher lifecycle is now verified as described in Delivery E below; it is not an installed-package or live-provider check.
 
 ## Confirmed preferences and remaining defaults
 
@@ -180,3 +180,13 @@ Implemented the runtime limits in `run_policy.py`, with the existing coordinator
 Run options and identity/start/counters persist through existing preferences and job payloads. Actual body reads count even when retransferred; existing resumed bytes do not. Resume, Apply limits and clear-history preserve the open run's budget. The deadline includes pauses, waiting and time after exit. Abrupt interruption of a byte-limited transfer conservatively holds uncertain accounting for an explicit new run while retaining the verified partial. Settings, timezone, current counter/deadline/hold and explicit Start new run are available in the native Run limits tab. No dependency or schema migration was needed.
 
 **Delivery D evidence: 3/3 for the checked local scope — 111 offline tests and the withdrawn native combined cap/window/boundary/retry/budget/save-restore scenario passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Whole-product evidence remains 2/3: E, live TeraBox compatibility, large real transfers, power loss and installed packaging remain pending. No real authentication/download, Windows autolaunch or power-setting change was used.**
+
+## Delivery E implementation record — 20 October 2026
+
+`desktop_integration.py` adds a lazy optional Windows tray backend. Tk is hidden only after checked Windows registration; missing/startup-failed support leaves it available, and a failed backend loop restores a hidden window. Show, Pause, Resume/Start, Cancel and Save/exit callbacks enqueue UI actions and use existing controls. X retains save/exit behavior. Startup and shutdown races are cancellation-aware; Tk keeps polling until the tray loop stops. Generic notifications default off, persist through existing preferences, and deduplicate download action-needed outcomes, completion and run limits without replaying restored history or schedule polls.
+
+`Start Tera.pyw` / `quiet_launcher.py` provide a console-free GUI entry point, preferring the project-local desktop environment and handing off before opening state. Safe, bounded local diagnostics record fixed events/PIDs only, including callback failures. `Start Tera.cmd` stays the diagnostic fallback. `requirements-desktop.txt` pins reviewed binary-wheel packages pystray 0.19.5, Pillow 13.0.0 and six 1.17.0; these extras require Python 3.11+, while base source syntax remains compatible with 3.10. The pinned pystray Windows message hook is narrowly overridden to detect rejected icon registration; recheck it when upgrading. No schema change, OS autostart/service, installer or shortcut was added. No existing Tera desktop shortcut was found.
+
+**Delivery E evidence: 3/3 for the checked local scope — 128 offline tests, dependency consistency, the withdrawn A-D native smoke, and the isolated Windows tray/real `.pyw`→`pythonw` lifecycle check passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. The native tray check covered restore, pause/resume, Cancel/reset, exact files, orderly exit, rejected registration and one intercepted generic notification; the launcher held the state lock and saved/exited on its owned WM_CLOSE. Later tray-close race and callback-log regressions passed offline. Whole-product evidence remains 2/3: real TeraBox resume/large files, long live pauses, real notification delivery, Explorer restart, sleep/resume, power loss and installed packaging are unverified.**
+
+All local roadmap deliveries are complete. The sandbox denied the native tray message-filter API; the successful tray check used the explicitly approved context outside it. Initial native startup-ordering and selection-fixture failures were diagnosed and corrected. No provider keys, real Firefox sessions, live downloads or notification banners were used; test profiles, state and files were synthetic. All final owned processes/windows closed, and task-owned temporary folders were removed. The live-provider gate remains explicitly pending.

@@ -1,6 +1,6 @@
 # Tera roadmap implementation checklist
 
-Status: Deliveries A-D implemented locally through 20 October 2026. T01-T15 and local checkpoints A1/A2/B/C/D passed the checks recorded below. Delivery C's live-provider gate and Delivery E remain pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
+Status: Deliveries A-E implemented locally through 20 October 2026. T01-T17 and all local delivery checkpoints passed the checks recorded below. Delivery C's live-provider gate remains pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
 
 **Evidence at the Delivery A checkpoint: 3/3 for that local scope — 47 offline tests and the isolated native Tkinter/real-entry-point smoke check passed on Python 3.12.10, Tk 8.6, and SQLite 3.49.1. B-E were then pending.**
 
@@ -9,6 +9,8 @@ Status: Deliveries A-D implemented locally through 20 October 2026. T01-T15 and 
 **Evidence at the Delivery C checkpoint: 3/3 for the checked local protocol/runtime scope — 91 offline tests, bounded loopback HTTP, forced process crash/recovery and the withdrawn native recovery flow passed. D/E were then pending; provider resume, power loss and large real files remained unverified.**
 
 **Evidence: Delivery D 3/3 for the checked local scope — 111 offline tests and the combined withdrawn native limits/recovery scenario passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Whole-product evidence remains 2/3; live provider compatibility, large real transfers, power loss and E remain unverified.**
+
+**Current evidence: Delivery E 3/3 for the checked local scope — 128 offline tests and both native harnesses passed, including the real Windows tray/quiet-launcher lifecycle with synthetic data and intercepted notifications. Whole-product evidence remains 2/3; live provider, large files, actual notification delivery and installed packaging remain unverified. Earlier delivery summaries below describe their historical checkpoints.**
 
 ## Delivery A — Queue, persistence, and everyday use
 
@@ -121,20 +123,20 @@ Status: Deliveries A-D implemented locally through 20 October 2026. T01-T15 and 
 
 ## Delivery E — Quiet desktop use and release checks
 
-- [ ] T16 — Add optional tray integration and notifications.
+- [x] T16 — Add optional tray integration and notifications.
   - Acceptance: explicit tray action; safe restore/exit; X saves the queue and exits as confirmed by the user; generic opt-in notifications fire once per meaningful outcome; missing tray support keeps the window available.
   - Verify: reviewed optional dependencies in a project-local environment, mocked notification/shell effects, and bounded isolated native lifecycle testing after advance notice when needed.
   - Likely files: `desktop_integration.py`, `test_desktop_integration.py`, `terabox.py`, `requirements-desktop.txt`, `smoke_terabox_gui.py`.
   - Dependencies: T10/T12/T14/T15. Scope: medium.
 
-- [ ] T17 — Add the quiet launcher and complete product documentation.
+- [x] T17 — Add the quiet launcher and complete product documentation.
   - Acceptance: pythonw launch records safe local diagnostics, no duplicate app state owner, no automatic browser/file opens, and readable setup/recovery/privacy/limit documentation.
   - Verify: supported isolated launcher startup/exit, safe missing-dependency handling, existing diagnostic launcher compatibility, and docs/source consistency.
   - Likely files: `Start Tera.pyw`, `terabox.py`, `smoke_terabox_gui.py`, `README.md`, `requirements-desktop.txt`.
   - Dependencies: T16. Scope: medium.
 
-- [ ] Final checkpoint — Full offline suite, loopback transfer fixture, crash/restart checks, isolated native smoke, state migration/rollback, and local privacy inspection pass. Report live-provider and any installed-release gates separately.
-- [ ] Update plan/checklist status with actual evidence; review and commit only the completed slice. Do not mark provider-dependent or native checks complete based on mocks.
+- [x] Final checkpoint — Full offline suite, loopback transfer fixture, crash/restart checks, isolated native smoke, existing state backup/restore and corrupt/newer-version refusal checks, and local privacy inspection pass. No schema migration or packaged installation was introduced; live-provider and installed-release gates remain separate.
+- [x] Update plan/checklist status with actual evidence; review and commit only the completed slice. Do not mark provider-dependent or native checks complete based on mocks.
 
 No automatic task below authorizes real Firefox cookie checks, live downloads, visible background consoles, unrelated process termination, or changes to power/VPN/system settings.
 
@@ -170,3 +172,12 @@ No automatic task below authorizes real Firefox cookie checks, live downloads, v
 - 111 offline tests passed, including fake-clock exact budget/deadline and overnight/timezone boundaries, bounded pacing/read sizes, cap changes, manual hold precedence, retry and restart byte accounting, clear-history continuity, failed hot-settings saves, throttled Skip/Cancel, saved run restoration and a hidden byte-budget crash test. A mutation weakening the exact budget boundary was detected and the original source restored.
 - The withdrawn native scenario combines a closed window, manual pause across opening, hot cap change, throttled pause and save/exit, restoration without requests, validated continuation, finish-current pause, window closure, a bounded retry held outside its window, manual retry hold, byte-budget overrun and explicit New run. All outputs were byte-exact, controls reset and owned instances closed cleanly; the original A-C/real-entry-point smoke still passes.
 - Runtime checks used temporary synthetic data, mocked login/provider/shell access and no live downloads. The full offline suite's owned loopback fixture required the previously established local-socket permission. No Windows task, wake-up, system-setting change, background service, installation or optional desktop dependency was introduced. E and the live-provider gate remain pending.
+
+## Delivery E verification record — 20 October 2026
+
+- Added the optional registered-before-hide Windows tray and generic opt-in notifications. The base interpreter remains dependency-free; reviewed wheels pystray 0.19.5 / Pillow 13.0.0 / six 1.17.0 are installed only in ignored `.venv-desktop`, and `pip check` passes. Their metadata identifies LGPLv3 / MIT-CMU / MIT respectively. The integration uses the pinned backend's message hook to check Windows registration rather than assuming a visible flag proves success.
+- Added `Start Tera.pyw` and safe local launcher diagnostics with rotation, failure/callback handling, isolated `--data-dir`, and project-environment handoff before opening the queue. The explicit diagnostic CMD launcher is unchanged. New boolean preferences validate at write/load boundaries. No schema migration, installed package, shortcut, system setting, persistent watcher or real-data change was needed.
+- All 128 offline tests passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1 with workspace temporary directories. New checks cover startup failure, cancel-before-ready, stop-during-registration, a tray-close wait without a false save error, opt-in/deduplication, restored history, quiet schedule/cancel/exit outcomes, preference persistence/invalid values, hidden handoff, callback/failure log privacy and rotation. Temporarily removing the opt-in guard made its focused regression fail; original bytes were restored before the passing final suite. Existing encrypted storage/backup/restore/corrupt-newer-state refusal, loopback HTTP and forced-crash recovery checks still pass.
+- `smoke_desktop.py` passed as owned PID 18112: real tray registration/hide/restore, Pause/Resume, Cancel/reset, exact synthetic bytes, Save/exit, intercepted generic notification and rejected Windows registration with the window kept accessible. The actual `.pyw` path launched hidden parent PID 32692 and `pythonw` app PID 21608, used empty APPDATA/LOCALAPPDATA and an isolated state lock, then saved/exited on its owned WM_CLOSE. No global keystrokes, clipboard or unrelated window was used. These processes exited; no owned desktop smoke directory remains.
+- The unchanged withdrawn `smoke_terabox_gui.py` passed as owned PID 24568 with the optional packages absent from its interpreter, preserving A-D native queue/recovery/run-limit flows and real isolated CLI startup/exit. Native tray execution required permission outside the sandbox because its Windows message-filter call was denied. After diagnosed startup-ordering and fixture-selection failures, the final corrected run passed under the user's explicit one-run approval.
+- Source syntax parses with Python 3.10 grammar; runtime execution was Python 3.12.10. No existing Tera desktop shortcut or packaging pipeline was found, so there is no installed-version/shortcut claim. Real OS notification banners were intercepted, not delivered. Live TeraBox authentication/range/validator/large-file checks, Explorer restarts, sleep/resume and power loss remain unverified. See README for recovery/backup/rollback and desktop-extra setup.

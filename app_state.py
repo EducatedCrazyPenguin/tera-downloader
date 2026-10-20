@@ -156,6 +156,8 @@ class StateStore:
             result = json.loads((self.directory / 'settings.json').read_text(encoding='utf-8'))
             if not isinstance(result, dict):
                 raise ValueError('Invalid preferences')
+            if 'notifications' in result and not isinstance(result['notifications'], bool):
+                raise ValueError('Invalid notifications preference')
             if 'firefox_profile' in result and result['firefox_profile'] is not None and not isinstance(result['firefox_profile'], str):
                 raise ValueError('Invalid profile preference')
             if 'last_destination' in result and not isinstance(result['last_destination'], str):

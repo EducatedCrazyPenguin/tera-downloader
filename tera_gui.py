@@ -16,6 +16,7 @@ from firefox_session import FirefoxProfile, SessionError, profiles
 from queue_manager import QueueManager, TERMINAL, REVIEW, HOLDS
 from terabox import DownloadError, TeraBox, open_firefox, parse_links
 from run_policy import validate_options
+from desktop_integration import Desktop, Notifications, available as desktop_available
 
 
 def size_text(value):
@@ -33,7 +34,7 @@ def duration_text(value):
 
 
 class TeraApp:
-    def __init__(self, root, manager, client_factory=None, available_profiles=None):
+    def __init__(self, root, manager, client_factory=None, available_profiles=None, desktop_factory=None):
         self.root, self.manager = root, manager
         self.client_factory = client_factory or TeraBox
         self.snapshot = None
@@ -47,6 +48,13 @@ class TeraApp:
         self.login_cancel = threading.Event()
         self.login_thread = None
         self.ui_events = queue.Queue()
+        self.desktop_supported = desktop_factory is not None or desktop_available()
+        self.desktop = (desktop_factory or Desktop)(self.ui_events)
+        self.notifications = Notifications()
+        self.pending_notifications = []
+        self.tray_pending = False
+        self.tray_hidden = False
+        self.tray_started = 0
         root.title('Tera — download queue')
         root.geometry('1020x760')
         root.minsize(880, 680)
@@ -105,6 +113,16 @@ class TeraApp:
         self.favorite_button.pack(side='left')
         self.forget_favorite_button = ttk.Button(favorite_row, text='Remove favorite', command=self.remove_favorite)
         self.forget_favorite_button.pack(side='left', padx=6)
+        desktop_row = ttk.Frame(frame)
+        desktop_row.pack(fill='x', pady=(0, 6))
+        self.tray_button = ttk.Button(desktop_row, text='Minimize to tray', command=self.minimize_to_tray)
+        self.tray_button.pack(side='left')
+        self.notify_enabled = tk.BooleanVar(value=False)
+        self.notify_check = ttk.Checkbutton(desktop_row, text='Notify on completion or action needed', variable=self.notify_enabled,
+                                           command=self.change_notifications)
+        self.notify_check.pack(side='left', padx=8)
+        self.desktop_status = tk.StringVar(value='X saves and exits.' if self.desktop_supported else 'Tray unavailable — optional desktop packages needed.')
+        ttk.Label(desktop_row, textvariable=self.desktop_status).pack(side='left')
         notebook = self.notebook = ttk.Notebook(frame)
         notebook.pack(fill='both', expand=True)
         self.review_page = ttk.Frame(notebook)
@@ -225,6 +243,56 @@ class TeraApp:
     def send(self, action, **data):
         if not self.closing and self.initialized and not self.manager.closed.is_set():
             self.manager.post(action, **data)
+
+    def minimize_to_tray(self):
+        if not self.desktop_supported or self.closing:
+            return
+        self.tray_pending = True
+        self.ensure_desktop()
+        if self.desktop.ready.is_set():
+            self.hide_to_tray()
+
+    def ensure_desktop(self):
+        if not self.closing and self.desktop.thread is None:
+            self.tray_started = time.monotonic()
+            self.desktop.start()
+
+    def hide_to_tray(self):
+        if self.tray_pending and self.desktop.ready.is_set() and not self.closing:
+            self.root.withdraw()
+            self.tray_hidden, self.tray_pending = True, False
+
+    def restore_window(self):
+        self.tray_pending = False
+        self.tray_hidden = False
+        self.root.deiconify()
+
+    def change_notifications(self):
+        self.send('preferences', changes={'notifications': self.notify_enabled.get()})
+
+    def desktop_event(self, action):
+        if action == 'ready':
+            self.hide_to_tray()
+        elif action in {'failed', 'notification_failed'}:
+            if self.tray_hidden:
+                self.restore_window()
+            self.tray_pending = False
+            self.pending_notifications.clear()
+            self.desktop_status.set('Tray failed; keep Tera open. Restart Tera to try again.' if action == 'failed' else 'Windows notification unavailable; see Tera for results.')
+            if action == 'failed':
+                self.desktop_supported = False
+                self.desktop.stop()
+            self.configure_controls()
+        elif action == 'restore':
+            self.restore_window()
+        elif action == 'exit':
+            if self.tray_hidden:
+                self.restore_window()
+            self.close()
+        elif not self.closing:
+            buttons = {'pause': self.pause_button, 'resume': self.start_button, 'cancel': self.cancel_button}
+            if action in buttons:
+                buttons[action].invoke()
 
     def source_changed(self, event=None):
         profile = self.profile_options.get(self.source.get())
@@ -425,6 +493,8 @@ class TeraApp:
     def configure_controls(self):
         snapshot = self.snapshot or {}
         available = self.initialized and not self.closing and not self.manager.closed.is_set()
+        self.tray_button.configure(state='normal' if available and self.desktop_supported and not self.tray_pending else 'disabled')
+        self.notify_check.configure(state='normal' if available and self.desktop_supported else 'disabled')
         working = snapshot.get('running') or snapshot.get('active')
         discovering = snapshot.get('review_busy')
         def enabled(widget, value):
@@ -530,6 +600,9 @@ class TeraApp:
         while not self.manager.events.empty():
             kind, data = self.manager.events.get_nowait()
             if kind == 'snapshot':
+                messages = self.notifications.observe(data)
+                if self.notify_enabled.get():
+                    self.pending_notifications = (self.pending_notifications + messages)[-2:]
                 latest = data
             elif kind == 'error':
                 error = data
@@ -557,7 +630,12 @@ class TeraApp:
                 self.window_start.set(options['start'])
                 self.window_end.set(options['end'])
                 self.window_enabled.set(options['schedule_enabled'])
+                self.notify_enabled.set(preferences.get('notifications') is True)
                 self.initialized = True
+            if self.desktop_supported and self.notify_enabled.get() and latest['preferences'].get('notifications') is True:
+                self.ensure_desktop()
+            elif not self.notify_enabled.get():
+                self.pending_notifications.clear()
             self.status.set(latest['message'])
             self.render()
         if error:
@@ -565,6 +643,9 @@ class TeraApp:
             self.configure_controls()
         while not self.ui_events.empty():
             kind, text = self.ui_events.get_nowait()
+            if kind == 'desktop':
+                self.desktop_event(text)
+                continue
             if kind == 'login_verified':
                 self.send('preferences', changes={'firefox_profile': text})
                 continue
@@ -572,22 +653,34 @@ class TeraApp:
             if kind == 'login_done':
                 self.login_busy = False
                 self.configure_controls()
+        if self.desktop.thread and not self.desktop.ready.is_set() and not self.desktop.stopped.is_set() and time.monotonic() - self.tray_started > 5:
+            self.desktop_event('failed')
+        if self.desktop.ready.is_set() and not self.closing:
+            for message in self.pending_notifications:
+                self.desktop.notify(message)
+            self.pending_notifications.clear()
         if self.closing and self.manager.closed.is_set() and not (self.login_thread and self.login_thread.is_alive()):
             if not self.close_error:
                 self.destroy()
-                return
-            self.status.set('The latest changes could not be saved. Previous saved data was kept. Close again to exit.')
+                if self.destroyed:
+                    return
+            else:
+                self.status.set('The latest changes could not be saved. Previous saved data was kept. Close again to exit.')
         if self.manager.closed.is_set():
             self.configure_controls()
         self.poll_id = self.root.after(50, self.poll)
 
     def destroy(self):
         if not self.destroyed:
+            self.desktop.stop()
+            if not self.desktop.stopped.is_set():
+                return
             self.destroyed = True
             self.root.after_cancel(self.poll_id)
             self.root.destroy()
 
     def close(self):
+        self.desktop.stop()
         if self.manager.closed.is_set() and not (self.login_thread and self.login_thread.is_alive()):
             self.destroy()
             return

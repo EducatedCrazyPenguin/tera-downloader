@@ -1,0 +1,4 @@
+# Optional Windows tray/notifications; Python 3.11+. Base app needs no packages.
+pystray==0.19.5
+Pillow==13.0.0
+six==1.17.0

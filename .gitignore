@@ -11,3 +11,4 @@ cookies*
 *.sqlite-*
 *.log
 *.png
+.venv-desktop/
