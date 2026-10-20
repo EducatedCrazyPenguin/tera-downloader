@@ -67,6 +67,33 @@ class TransferStateTests(unittest.TestCase):
         self.assertEqual(self.saved['phase'], 'ready')
         self.assertNotIn('signed', repr(self.saved))
 
+    def test_verification_reports_prefix_and_finalized_bytes_without_network(self):
+        self.partial()
+        events = []
+        state = self.state()
+        state.verification = lambda done, total: events.append((done, total))
+        with state.open_partial():
+            pass
+        self.assertEqual(events, [(0, 400), (400, 400)])
+        with state.path.open('r+b') as output:
+            output.write(BODY)
+            state.sync(output, hashlib.sha256(BODY), len(BODY), '"version-1"', phase='ready')
+        state.path.rename(state.target)
+        events.clear()
+        self.assertEqual(state.reconcile(), state.target)
+        self.assertEqual(events, [(0, len(BODY)), (len(BODY), len(BODY))])
+
+    def test_cancel_during_verification_keeps_saved_prefix_and_closes_file(self):
+        path = self.partial()
+        state = self.state()
+        def cancelled():
+            raise Cancelled('Synthetic cancellation')
+        state.check = cancelled
+        with self.assertRaises(Cancelled):
+            state.open_partial()
+        self.assertEqual(path.read_bytes(), BODY[:400])
+        path.rename(path.with_suffix('.held'))
+
     def test_invalid_ranges_validators_and_representations_never_append(self):
         cases = [Response(BODY), Response(b'', 416),
                  Response(BODY[400:], 206, **{'Content-Range': 'bytes 0-599/1000'}),

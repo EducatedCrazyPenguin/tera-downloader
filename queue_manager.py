@@ -17,7 +17,7 @@ from app_state import StateError, StateStore
 from firefox_session import FirefoxProfile
 from review_storage import (StorageError, available_space, input_key, preflight, prior_download,
                             required_space, share_folder, share_key, target_paths)
-from terabox import Cancelled, DownloadError, PAUSED_STATUS, TeraBox, parse_links
+from terabox import Cancelled, DownloadError, PAUSED_STATUS, TeraBox, parse_links, _wait_for_download
 from terabox import safe_name
 from recovery import can_retry
 from transfer_state import Checkpoint, RestartRequired, fresh_checkpoint
@@ -115,6 +115,7 @@ class QueueManager:
     def _run(self):
         self.jobs = []
         self.active = None
+        self.verification = None
         self.worker = None
         self.cancel = threading.Event()
         self.discard_current = threading.Event()
@@ -620,9 +621,15 @@ class QueueManager:
                 elif not self.pause.is_set() and not self.intent and not self.boundary and not self.policy_hold and data['text'] != PAUSED_STATUS:
                     self.message = data['text']
             elif action == '_progress':
+                self.verification = None
                 job.received = data['received']
                 self.meter.update(job.received)
+            elif action == '_verification':
+                done, total = data['done'], data['total']
+                if type(done) is int and type(total) is int and 0 <= done <= total:
+                    self.verification = {'done': done, 'total': total}
             elif action == '_result':
+                self.verification = None
                 outcome, value = data['outcome'], data['value']
                 if outcome == 'discovered' and not self.intent:
                     videos = value
@@ -724,6 +731,8 @@ class QueueManager:
             self._save()
             return
         self.active = job.id
+        self.verification = None
+        self.message = 'Reconnecting through the selected source…' if job.cycle_attempts else 'Preparing download…'
         if job.run_id != self.policy.record['id']:
             job.run_id, job.run_bytes = self.policy.record['id'], 0
         job.attempt += 1
@@ -810,9 +819,15 @@ class QueueManager:
                 def commit(record):
                     return self.request('_checkpoint', job_id=job.id, attempt=job.attempt, checkpoint=record)
                 state = self._checkpoint_state(job, commit, discard)
+                last_check = [0.0]
+                def verification(done, total):
+                    now = time.monotonic()
+                    if done == 0 or done == total or now - last_check[0] >= .15:
+                        emit('_verification', done=done, total=total)
+                        last_check[0] = now
+                state.verification = verification
                 def check_stopped():
-                    if cancel.is_set():
-                        raise Cancelled('Stopped.')
+                    _wait_for_download(cancel, self.pause, lambda text: emit('_status', text=text))
                 state.check = check_stopped
                 completed = state.reconcile()
                 if completed:
@@ -873,10 +888,10 @@ class QueueManager:
         total = sum(j.video['size'] for j in members if j.video)
         received = sum(j.received for j in members)
         unknown = any(not j.video for j in members)
-        speed = self.meter.rate_at(time.monotonic()) if current and current.video and not self.pause.is_set() and not self.intent else 0
+        speed = self.meter.rate_at(time.monotonic()) if current and current.video and not self.pause.is_set() and not self.intent and self.verification is None else 0
         held = bool(self.policy_hold and not self.active and self.running)
         return deepcopy({'jobs': [asdict(j) for j in self.jobs], 'preferences': self.preferences,
-                         'active': self.active, 'running': self.running, 'paused': self.pause.is_set() or held,
+                         'active': self.active, 'verification': self.verification, 'running': self.running, 'paused': self.pause.is_set() or held,
                          'manual_paused': self.pause.is_set(), 'policy_hold': self.policy_hold,
                          'run_options': self.policy.options, 'run_state': self.policy.record,
                          'timezone': local_now().strftime('%Z (UTC%z)'),

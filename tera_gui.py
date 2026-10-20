@@ -33,6 +33,13 @@ def duration_text(value):
     return f'{seconds // 3600:d}h {(seconds % 3600) // 60:02d}m' if seconds >= 3600 else f'{seconds // 60:d}m {seconds % 60:02d}s'
 
 
+def transfer_message(snapshot):
+    checking = snapshot.get('verification')
+    if checking and not any(snapshot.get(key) for key in ('paused', 'stopping', 'closing')):
+        return f"Checking saved download: {size_text(checking['done'])} of {size_text(checking['total'])}"
+    return snapshot['message']
+
+
 class TeraApp:
     def __init__(self, root, manager, client_factory=None, available_profiles=None, desktop_factory=None):
         self.root, self.manager = root, manager
@@ -558,7 +565,10 @@ class TeraApp:
                 history.append((job['id'], (name, job['status'].capitalize(), finished, job['error'] or job['path'])))
             else:
                 percent = f"{job['received'] / video['size']:.0%}" if video and video['size'] else '—'
-                status = 'Needs attention' if job['status'] == 'attention' else job['status'].capitalize()
+                status = {'attention': 'Storage needs attention', 'login': 'Login required', 'restart': 'Restart required',
+                          'retry_wait': 'Waiting to retry'}.get(job['status'], job['status'].capitalize())
+                if self.snapshot.get('verification') and job['id'] == self.snapshot['active']:
+                    status = 'Checking saved download'
                 if self.snapshot['paused'] and job['id'] == self.snapshot['active']:
                     status = 'Paused' if self.snapshot['pause_acknowledged'] else 'Pausing…'
                 source = job['profile']['name'] if job['profile'] else 'No login'
@@ -636,7 +646,7 @@ class TeraApp:
                 self.ensure_desktop()
             elif not self.notify_enabled.get():
                 self.pending_notifications.clear()
-            self.status.set(latest['message'])
+            self.status.set(transfer_message(latest))
             self.render()
         if error:
             self.status.set(error)

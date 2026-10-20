@@ -126,6 +126,25 @@ class QueueTests(unittest.TestCase):
         self.assertFalse((self.folder / 'videos' / 'first.mp4').exists())
         self.assertEqual(next(j for j in finished['jobs'] if j['id'] == current)['received'], 0)
 
+    def test_verification_is_attempt_scoped_and_does_not_count_as_download(self):
+        snapshot = self.add_and_resolve()
+        current = next(j for j in snapshot['jobs'] if j['id'] == snapshot['active'])
+        args = {'job_id': current['id'], 'attempt': current['attempt']}
+        self.manager.request('_verification', **args, done=2, total=4)
+        checking = self.manager.request('snapshot')
+        self.assertEqual(checking['verification'], {'done': 2, 'total': 4})
+        self.assertEqual(checking['received'], snapshot['received'])
+        self.assertEqual(checking['run_state']['bytes'], 0)
+        self.assertEqual(checking['speed'], 0)
+        self.manager.request('_verification', job_id=current['id'], attempt=0, done=9, total=9)
+        self.assertEqual(self.manager.request('snapshot')['verification'], checking['verification'])
+        self.manager.request('pause')
+        self.wait_for(lambda s: s['pause_acknowledged'])
+        self.assertIn('Paused', self.manager.request('snapshot')['message'])
+        self.manager.request('cancel')
+        self.wait_for(lambda s: not s['active'])
+        self.assertIsNone(self.manager.request('snapshot')['verification'])
+
     def test_close_active_keeps_pending_job_and_retry_failed_is_selective(self):
         snapshot = self.add_and_resolve()
         current = snapshot['active']

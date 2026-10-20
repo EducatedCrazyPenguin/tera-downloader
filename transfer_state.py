@@ -27,7 +27,7 @@ def fresh_checkpoint(binding):
 
 
 class Checkpoint:
-    def __init__(self, record, folder, name, size, binding, commit, discard):
+    def __init__(self, record, folder, name, size, binding, commit, discard, *, verification=None):
         self.record = deepcopy(record)
         self.size, self.commit, self.discard = size, commit, discard
         self.folder = Path(folder).resolve()
@@ -47,6 +47,7 @@ class Checkpoint:
         self.path = self.folder / ('.tera-' + record['token'] + '.part')
         self.hasher = hashlib.sha256()
         self.check = lambda: None
+        self.verification = verification or (lambda done, total: None)
 
     def _owned(self):
         try:
@@ -87,6 +88,7 @@ class Checkpoint:
                 raise RestartRequired('The partial is shorter than its durable checkpoint. Restart is required.')
             remaining = self.record['offset']
             self.hasher = hashlib.sha256()
+            self.verification(0, remaining)
             while remaining:
                 self.check()
                 chunk = output.read(min(1024 * 1024, remaining))
@@ -94,6 +96,7 @@ class Checkpoint:
                     raise RestartRequired()
                 self.hasher.update(chunk)
                 remaining -= len(chunk)
+                self.verification(self.record['offset'] - remaining, self.record['offset'])
             if self.hasher.hexdigest() != self.record['digest']:
                 raise RestartRequired('The saved bytes changed. They were not appended or finalized.')
             if info.st_size != self.record['offset']:
@@ -129,12 +132,16 @@ class Checkpoint:
                 if [opened.st_dev, opened.st_ino] != self.record['file_id']:
                     raise RestartRequired()
                 hasher = hashlib.sha256()
+                checked = 0
+                self.verification(0, self.size)
                 while True:
                     self.check()
                     chunk = saved.read(1024 * 1024)
                     if not chunk:
                         break
                     hasher.update(chunk)
+                    checked += len(chunk)
+                    self.verification(checked, self.size)
                 digest = hasher.hexdigest()
             if digest != self.record['digest']:
                 raise RestartRequired('A different final file exists. It was left untouched.')

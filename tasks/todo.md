@@ -1,5 +1,16 @@
 # Tera roadmap implementation checklist
 
+## Personal release 0.1.0 — approved 20 October 2026
+
+- [ ] P01 — Saved-byte verification progress and distinct recovery/wait messages; test cancellation, stale events and counters.
+- [ ] P02 — Review/History search and sorting, visible selection, atomic batch destinations; test persistence and failures.
+- [ ] P03 — Allowlisted rotating activity log, About/Help and diagnostics export; test privacy, rotation and write failures.
+- [ ] P04 — Packaged runtime, safe Downloads default, isolated data selection and installer mutex; test compatibility.
+- [ ] P05 — Build self-contained Windows 0.1.0 installer; verify synthetic packaged/upgrade/installed shortcut flows.
+- [ ] P06 — Full offline suite, documentation, review, commit and push. Live-provider gate remains separate.
+
+Evidence: 2/3 — Approved implementation scope; new release behavior and installation not yet verified.
+
 Status: Deliveries A-E implemented locally through 20 October 2026. T01-T17 and all local delivery checkpoints passed the checks recorded below. Delivery C's live-provider gate remains pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
 
 **Evidence at the Delivery A checkpoint: 3/3 for that local scope — 47 offline tests and the isolated native Tkinter/real-entry-point smoke check passed on Python 3.12.10, Tk 8.6, and SQLite 3.49.1. B-E were then pending.**
