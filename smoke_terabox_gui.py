@@ -24,8 +24,12 @@ LINK = 'https://terabox.com/s/1synthetic'
 
 
 class SyntheticResponse(io.BytesIO):
-    status = 200
-    headers = {'Content-Type': 'application/octet-stream', 'Content-Length': str(len(BODY))}
+    def __init__(self, body, offset=0):
+        super().__init__(body[offset:])
+        self.status = 206 if offset else 200
+        self.headers = {'Content-Type': 'application/octet-stream', 'Content-Length': str(len(body) - offset), 'ETag': '"synthetic-v1"'}
+        if offset:
+            self.headers['Content-Range'] = f'bytes {offset}-{len(body)-1}/{len(body)}'
 
     def read(self, size):
         time.sleep(.04)
@@ -49,16 +53,19 @@ class SyntheticClient(terabox.TeraBox):
         self.cancel.wait(.05)
         self.check_cancel()
 
-    def download(self, video, folder, progress):
+    def download(self, video, folder, progress, *, checkpoint=None):
         self.calls.append(('download', video.fid))
         if video.fid == 'broken' and type(self).fail_once:
             type(self).fail_once = False
             raise terabox.DownloadError('Synthetic unavailable file.')
-        return super().download(video, folder, progress)
+        return super().download(video, folder, progress, checkpoint=checkpoint)
 
     def open(self, *args, **kwargs):
         self.check_cancel()
-        return SyntheticResponse(BODY)
+        headers = kwargs.get('headers') or {}
+        offset = int(headers.get('Range', 'bytes=0-')[6:-1])
+        self.calls.append(('range', offset))
+        return SyntheticResponse(BODY, offset)
 
 
 def main():
@@ -214,7 +221,7 @@ def main():
             assert app.pause_button.instate(['disabled']) and app.cancel_button.instate(['disabled'])
             submit(LINK.replace('synthetic', 'restore2x'), base / 'restore2')
             app.download_button.invoke()
-            wait(lambda: bool(app.snapshot['active']), 'save/exit transfer')
+            wait(lambda: bool(app.snapshot['active']) and app.snapshot['received'] > 0, 'save/exit transfer')
             app.pause_button.invoke()
             wait(lambda: app.snapshot['pause_acknowledged'], 'save/exit pause')
             original = [j['id'] for j in app.snapshot['jobs']]
@@ -228,10 +235,47 @@ def main():
             assert len(SyntheticClient.calls) == calls and not app.snapshot['running']
             assert any(j['status'] == 'excluded' for j in app.snapshot['jobs'])
             assert app.snapshot['preferences']['favorites'][0]['name'] == 'Movies'
-            assert not list(base.glob('restore2/*.part'))
+            assert list(base.glob('restore2/.tera-*.part'))
+            assert any(j['checkpoint'].get('offset', 0) > 0 for j in app.snapshot['jobs'])
             app.start_button.invoke()
             wait(lambda: not app.snapshot['running'] and not any(j['status'] in {'pending', 'downloading'} for j in app.snapshot['jobs']), 'restored queue')
+            assert any(kind == 'range' and value > 0 for kind, value in SyntheticClient.calls[calls:])
             assert all(Path(j['path']).read_bytes() == BODY for j in app.snapshot['jobs'] if j['status'] == 'completed')
+            app.clear_button.invoke()
+            wait(lambda: not any(j['status'] == 'completed' for j in app.snapshot['jobs']), 'clear receipts before restart scenario')
+            submit(LINK.replace('synthetic', 'restartx'), base / 'restart-check')
+            candidates = [j for j in app.snapshot['jobs'] if j['status'] == 'review']
+            for candidate in candidates[1:]:
+                app.review_tree.selection_set(candidate['id'])
+                app.toggle_review(SimpleNamespace(keysym='space'))
+            wait(lambda: sum(j['status'] == 'review' for j in app.snapshot['jobs']) == 1, 'restart scenario selection')
+            identifier = candidates[0]['id']
+            def interrupt_then_ignore(client, *args, **kwargs):
+                response = SyntheticResponse(BODY)
+                if not (kwargs.get('headers') or {}).get('Range'):
+                    read = response.read
+                    def interrupted(size):
+                        if response.tell() >= 512 * 1024:
+                            raise terabox.DownloadError('Synthetic connection interruption.', kind='transient', retry_after=.01)
+                        return read(size)
+                    response.read = interrupted
+                return response
+            with patch.object(SyntheticClient, 'open', autospec=True, side_effect=interrupt_then_ignore):
+                app.download_button.invoke()
+                wait(lambda: any(j['id'] == identifier and j['status'] == 'restart' for j in app.snapshot['jobs']), 'rejected HTTP continuation', seconds=7)
+            app.queue_tree.selection_set(identifier)
+            app.configure_controls()
+            assert app.start_button.instate(['disabled']) and not app.restart_button.instate(['disabled'])
+            saved = next(j for j in app.snapshot['jobs'] if j['id'] == identifier)
+            partial = Path(saved['folder']) / ('.tera-' + saved['checkpoint']['token'] + '.part')
+            assert partial.read_bytes() == BODY[:512 * 1024]
+            app.restart_button.invoke()
+            wait(lambda: any(j['id'] == identifier and j['status'] == 'pending' and not j['checkpoint'] for j in app.snapshot['jobs']), 'explicit restart selection')
+            assert not partial.exists()
+            app.start_button.invoke()
+            wait(lambda: any(j['id'] == identifier and j['status'] == 'completed' for j in app.snapshot['jobs']), 'explicit full restart')
+            saved = next(j for j in app.snapshot['jobs'] if j['id'] == identifier)
+            assert Path(saved['path']).read_bytes() == BODY
             app.close()
             wait(lambda: manager.closed.is_set() and app.destroyed, 'restored exit')
         finally:
@@ -272,6 +316,7 @@ def main():
         print('PASS: native review/checkbox selection, duplicate inputs/aliases, exclusions, per-share folders, rename/folder conflict correction')
         print('PASS: favorites, login isolation, failed-save recovery, queue append/edit, pause/rapid toggles, finish-current pause, cancel/reset')
         print('PASS: byte-exact files, history/retry/clear, reveal stub, save/exit, held restore, isolated real CLI startup/exit')
+        print('PASS: retained durable bytes, validated Range continuation, bounded retry, rejected 200 response, explicit Restart control')
 
 
 if __name__ == '__main__':

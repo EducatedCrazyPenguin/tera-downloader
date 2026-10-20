@@ -5,6 +5,8 @@ from collections import deque
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+import hashlib
+import json
 import os
 import queue
 import threading
@@ -17,10 +19,13 @@ from review_storage import (StorageError, available_space, input_key, preflight,
                             required_space, share_folder, share_key, target_paths)
 from terabox import Cancelled, DownloadError, PAUSED_STATUS, TeraBox, parse_links
 from terabox import safe_name
+from recovery import can_retry
+from transfer_state import Checkpoint, RestartRequired, fresh_checkpoint
 
 
 TERMINAL = {'completed', 'failed', 'skipped', 'cancelled'}
 REVIEW = {'unreviewed', 'reviewing', 'review', 'excluded'}
+HOLDS = {'attention', 'restart', 'login'}
 
 
 class SpeedMeter:
@@ -66,6 +71,10 @@ class Job:
     output_name: str = ''
     receipt: dict = field(default_factory=dict)
     per_share: bool = False
+    checkpoint: dict = field(default_factory=dict)
+    cycle_attempts: int = 0
+    retry_due: float = 0.0
+    error_kind: str = ''
 
 
 class QueueManager:
@@ -105,6 +114,7 @@ class QueueManager:
         self.active = None
         self.worker = None
         self.cancel = threading.Event()
+        self.discard_current = threading.Event()
         self.running = False
         self.closing = False
         self.intent = ''
@@ -127,15 +137,23 @@ class QueueManager:
                 for row in store.load_jobs():
                     job = Job(**row)
                     parse_links(job.link)
-                    if job.status not in TERMINAL | REVIEW | {'pending', 'resolving', 'downloading', 'attention'}:
+                    if job.status not in TERMINAL | REVIEW | HOLDS | {'pending', 'resolving', 'downloading', 'retry_wait'}:
                         raise ValueError('Invalid status')
                     if job.video and (set(job.video) != {'name', 'size', 'fid'} or int(job.video['size']) <= 0):
                         raise ValueError('Invalid metadata')
                     if job.status == 'reviewing':
                         job.status = 'unreviewed'
-                    elif job.status not in TERMINAL | REVIEW | {'attention'}:
+                    elif job.status not in TERMINAL | REVIEW | HOLDS:
                         job.status = 'pending'
-                        job.received = 0
+                        job.received = job.checkpoint.get('offset', 0) if isinstance(job.checkpoint, dict) else 0
+                    if job.checkpoint:
+                        try:
+                            self._checkpoint_state(job)
+                        except RestartRequired:
+                            job.status, job.error_kind, job.error = 'restart', 'restart', 'Saved checkpoint cannot be verified. Restart is required.'
+                            job.received = 0
+                    if type(job.cycle_attempts) is not int or not 0 <= job.cycle_attempts <= 2:
+                        raise ValueError('Invalid retry budget')
                     self.jobs.append(job)
             except (TypeError, ValueError, DownloadError):
                 raise StateError('Saved jobs are invalid. The queue was left unchanged.') from None
@@ -146,16 +164,17 @@ class QueueManager:
                 try:
                     action, data, reply = self.commands.get(timeout=.5)
                 except queue.Empty:
-                    if self.active:
-                        self._publish()
-                    continue
+                    action, data, reply = '_tick', {}, None
                 if action == '_status' and data['text'] == self.message:
                     continue
                 try:
                     value = self._handle(action, data)
                     if action != 'snapshot':
                         self._advance_review()
-                        self._advance()
+                    self._advance()
+                    if action == 'snapshot':
+                        value = self._snapshot()
+                    else:
                         self._publish()
                     if reply:
                         reply.put((True, value))
@@ -209,9 +228,61 @@ class QueueManager:
             raise DownloadError('That queue item is no longer available.')
         return job
 
+    @staticmethod
+    def _binding(job):
+        value = [job.id, input_key(job.link), job.profile, job.folder, job.video, job.identity, job.output_name]
+        return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+    def _checkpoint_state(self, job, commit=lambda value: True, discard=None):
+        if not job.video:
+            raise RestartRequired('A checkpoint requires reviewed file metadata.')
+        return Checkpoint(job.checkpoint, job.folder, job.output_name or job.video['name'], job.video['size'],
+                          self._binding(job), commit, discard or threading.Event())
+
+    def _discard(self, job):
+        if job.checkpoint:
+            try:
+                if not isinstance(job.checkpoint, dict) or not job.video:
+                    raise RestartRequired()
+                # Disconnect can clear the login reference; ownership still requires the recorded file ID.
+                Checkpoint(job.checkpoint, job.folder, job.output_name or job.video['name'], job.video['size'],
+                           job.checkpoint.get('binding'), lambda value: True, threading.Event()).discard_owned()
+            except RestartRequired:
+                pass  # An invalid ownership record cannot authorize deleting a file.
+            job.checkpoint = {}
+
     def _handle(self, action, data):
+        if action == '_tick':
+            return
         if action == 'snapshot':
             return self._snapshot()
+        if action == '_checkpoint':
+            if self.active != data['job_id']:
+                return False
+            job = self._job(data['job_id'])
+            if job.attempt != data['attempt'] or self.intent in {'skip', 'cancel'}:
+                return False
+            record = data['checkpoint']
+            if record.get('token') != job.checkpoint.get('token') or record.get('offset', -1) < job.checkpoint.get('offset', 0):
+                raise StateError('An invalid transfer checkpoint was rejected.')
+            if job.checkpoint.get('file_id') and record.get('file_id') != job.checkpoint['file_id']:
+                raise StateError('A changed partial ownership record was rejected.')
+            self._checkpoint_state(replace(job, checkpoint=record))
+            job.checkpoint = deepcopy(record)
+            self._save()
+            return True
+        if action == 'restart':
+            job = self._job(data['job_id'])
+            if job.source_blocked:
+                raise DownloadError('Firefox was disconnected. Review the share again with your chosen login source.')
+            if job.id == self.active or job.status not in {'failed', 'pending'} | HOLDS:
+                raise DownloadError('Stop this file before restarting it.')
+            self._discard(job)
+            job.status, job.received, job.error, job.error_kind = 'pending', 0, '', ''
+            job.cycle_attempts, job.retry_due = 0, 0
+            self._save()
+            self.message = 'Restart from zero chosen. Click Resume or Start to download.'
+            return
         if action == 'review_saved':
             self.review_requested.update(j.id for j in self.jobs if j.status == 'unreviewed' and not j.source_blocked)
             return
@@ -271,6 +342,8 @@ class QueueManager:
             job = self._job(data['job_id'])
             if job.status not in {'pending', 'attention', 'review', 'excluded'}:
                 raise DownloadError('Stop the active file before changing its destination; it must restart from zero.')
+            if job.checkpoint.get('file_id'):
+                raise RestartRequired('Choose Restart from zero before changing the saved partial destination or name.')
             if 'name' in data:
                 name = data['name']
                 if not name or name != safe_name(name):
@@ -285,6 +358,7 @@ class QueueManager:
             if job.status == 'attention':
                 job.status = 'pending'
             job.error = ''
+            job.checkpoint, job.cycle_attempts = {}, 0
             try:
                 self.review_space[job.folder] = available_space(job.folder)
             except OSError:
@@ -365,6 +439,8 @@ class QueueManager:
             self.message = 'Firefox disconnected. Affected unfinished jobs require an explicit re-add; no anonymous fallback was used.'
             return
         if action == 'start':
+            if any(j.status in {'restart', 'login'} for j in self.jobs):
+                raise DownloadError('Resolve Restart required or Login required using the selected job actions before resuming.')
             if self.error_hold:
                 if self.active:
                     raise DownloadError('Wait for the current request to stop, then retry saving the queue.')
@@ -375,6 +451,7 @@ class QueueManager:
             for job in self.jobs:
                 if job.status == 'attention':
                     job.status, job.error = 'pending', ''
+                    job.cycle_attempts = 0
             if not self.running:
                 self.run_ids = {j.id for j in self.jobs if j.status == 'pending'}
                 self.running = bool(self.run_ids or self.active)
@@ -417,6 +494,7 @@ class QueueManager:
                 raise DownloadError('Only pending jobs can be removed. Use Skip for the active file.')
             if job.id == self.review_active:
                 raise DownloadError('Wait for this review to finish before removing it.')
+            self._discard(job)
             self.jobs.remove(job)
             self.review_requested.discard(job.id)
             self._save()
@@ -425,9 +503,10 @@ class QueueManager:
             selected = set(data['job_ids'])
             count = 0
             for job in self.jobs:
-                if job.id in selected and job.status == 'failed' and not job.source_blocked:
+                if job.id in selected and job.status in {'failed', 'login'} and not job.source_blocked:
                     job.status, job.error, job.received, job.finished = ('pending' if job.video else 'unreviewed'), '', 0, 0
                     count += 1
+                    job.cycle_attempts, job.retry_due = 0, 0
                     if self.running:
                         self.run_ids.add(job.id)
             self._save()
@@ -436,17 +515,18 @@ class QueueManager:
         if action == 'clear_history':
             if self.running or self.active:
                 raise DownloadError('Finish or stop the queue before clearing history.')
-            self.jobs = [j for j in self.jobs if j.status not in TERMINAL]
+            self.jobs = [j for j in self.jobs if j.status not in TERMINAL or j.checkpoint.get('file_id')]
             for job in self.jobs:
                 if job.status in {'review', 'excluded'}:
                     job.error = self._duplicate(job, in_review=True)
             self._save()
-            self.message = 'History cleared. Downloaded files were kept.'
+            self.message = 'History cleared. Downloaded files and unfinished owned partials were kept.'
             return
         if action in ('skip', 'cancel', 'close'):
             if action == 'skip' and not self.active:
-                job = self._job(data['job_id']) if data.get('job_id') else next((j for j in self.jobs if j.status == 'attention'), None)
-                if job and job.status in {'attention', 'pending'}:
+                job = self._job(data['job_id']) if data.get('job_id') else next((j for j in self.jobs if j.status in HOLDS | {'retry_wait'}), None)
+                if job and (job.status in HOLDS | {'pending', 'retry_wait'} or job.status == 'failed' and job.checkpoint):
+                    self._discard(job)
                     job.status, job.finished, job.error = 'skipped', time.time(), ''
                     self._save()
                 return
@@ -457,7 +537,8 @@ class QueueManager:
                 self.review_cancel.set()
                 self.review_requested.clear()
                 for job in self.jobs:
-                    if job.status in {'pending', 'attention'} and action == 'cancel':
+                    if job.id != self.active and job.status in HOLDS | {'pending', 'retry_wait'} and action == 'cancel':
+                        self._discard(job)
                         job.status = 'cancelled'
                         job.finished = time.time()
             if action == 'close':
@@ -469,6 +550,8 @@ class QueueManager:
                 self.message = 'Skipping the current item…'
             if self.active:
                 self.intent = action
+                if action in {'skip', 'cancel'}:
+                    self.discard_current.set()
                 self.cancel.set()
             self._save()
             return
@@ -493,6 +576,7 @@ class QueueManager:
                     videos = value
                     job.video = videos[0]
                     job.status = 'pending'
+                    job.cycle_attempts = 0
                     position = self.jobs.index(job) + 1
                     extras = [Job(uuid.uuid4().hex, job.link, job.folder, job.profile, video) for video in videos[1:]]
                     self.jobs[position:position] = extras
@@ -501,25 +585,41 @@ class QueueManager:
                     job.status, job.path = 'completed', value
                     job.received = job.video['size']
                     job.finished = time.time()
+                    job.checkpoint, job.retry_due, job.error_kind = {}, 0, ''
                     try:
                         info = Path(value).stat()
                         job.receipt = {'size': info.st_size, 'mtime_ns': info.st_mtime_ns}
                     except OSError:
                         job.receipt = {}
                 elif self.intent == 'close':
-                    job.status, job.received = 'pending', 0
+                    job.status, job.received = 'pending', job.checkpoint.get('offset', 0)
                 elif self.error_hold:
-                    job.status, job.received = 'pending', 0
+                    job.status, job.received = 'pending', job.checkpoint.get('offset', 0)
                 elif self.intent in ('skip', 'cancel'):
                     job.status = 'skipped' if self.intent == 'skip' else 'cancelled'
                     job.received, job.finished = 0, time.time()
-                elif outcome == 'storage':
-                    job.status, job.error, job.received = 'attention', value, 0
+                    job.checkpoint = {}
+                elif outcome in {'storage', 'restart', 'login'}:
+                    job.status, job.error, job.received = ('attention' if outcome == 'storage' else outcome), value, job.checkpoint.get('offset', 0)
+                    job.error_kind = outcome
                     self.pause.set()
                     self.acknowledged = True
                     self.message = value
                 else:
-                    job.status, job.error, job.received, job.finished = 'failed', value, 0, time.time()
+                    kind = data.get('kind', 'unknown')
+                    job.error_kind, job.error = kind, value
+                    job.received = job.checkpoint.get('offset', 0)
+                    if can_retry(kind, job.cycle_attempts, job.checkpoint):
+                        job.status, job.retry_due = 'retry_wait', time.time() + data.get('retry_after', 5)
+                        self.message = 'Connection interrupted. One bounded retry is waiting; Pause or Cancel remains available.'
+                    elif kind in {'transient', 'expired'} and job.received and not job.checkpoint.get('etag'):
+                        job.status, job.error_kind = 'restart', 'restart'
+                        job.error = 'Saved bytes have no strong server validator. Choose Restart from zero explicitly.'
+                        self.pause.set()
+                        self.acknowledged = True
+                        self.message = job.error
+                    else:
+                        job.status, job.finished = 'failed', time.time()
                 self.worker.join(1)
                 self.worker = None
                 self.active, self.intent = None, ''
@@ -527,11 +627,11 @@ class QueueManager:
                     self.boundary = False
                     self.pause.set()
                     self.acknowledged = True
-                    if job.status != 'attention':
+                    if job.status not in HOLDS:
                         self.message = 'Paused after the current file. Click Resume to continue.'
                 elif self.pause.is_set() and not self.error_hold:
                     self.acknowledged = True
-                    if job.status != 'attention':
+                    if job.status not in HOLDS:
                         self.message = PAUSED_STATUS
                 self._save()
             return
@@ -540,22 +640,41 @@ class QueueManager:
     def _advance(self):
         if self.closing or not self.running or self.active or self.pause.is_set():
             return
-        job = next((j for j in self.jobs if j.status == 'pending'), None)
+        job = next((j for j in self.jobs if j.status in {'pending', 'retry_wait'}), None)
         if not job:
             self.running = False
             completed = sum(j.id in self.run_ids and j.status == 'completed' for j in self.jobs)
             failed = sum(j.id in self.run_ids and j.status == 'failed' for j in self.jobs)
             self.message = f'Queue finished: {completed} saved, {failed} failed.'
             return
+        if job.retry_due > time.time():
+            job.status = 'retry_wait'
+            self.message = f'Retry in {max(1, int(job.retry_due - time.time()))}s. Pause or Cancel remains available.'
+            return
+        if job.cycle_attempts >= 2:
+            job.status, job.error = 'failed', 'The two-attempt recovery budget is exhausted. Select Retry to begin a new cycle.'
+            self._save()
+            self.running = False
+            self.message = job.error
+            return
+        if job.source_blocked:
+            job.status, job.error = 'failed', 'This job was disconnected. Review it with your chosen login source.'
+            self._save()
+            return
         self.active = job.id
         job.attempt += 1
-        job.received = 0
+        job.cycle_attempts += 1
+        job.retry_due = 0
+        if job.video and not job.checkpoint:
+            job.checkpoint = fresh_checkpoint(self._binding(job))
+        job.received = job.checkpoint.get('offset', 0)
         job.status = 'downloading' if job.video else 'resolving'
         self.cancel = threading.Event()
-        self.meter.reset()
+        self.discard_current = threading.Event()
+        self.meter.reset(job.received)
         self._save()
-        pending = [(j.folder, j.video['size']) for j in self.jobs if j.video and j.status in {'pending', 'downloading'}]
-        self.worker = threading.Thread(target=self._transfer, args=(deepcopy(job), self.cancel, pending),
+        pending = [(j.folder, j.video['size'] - j.checkpoint.get('offset', 0)) for j in self.jobs if j.video and j.status in {'pending', 'downloading'}]
+        self.worker = threading.Thread(target=self._transfer, args=(deepcopy(job), self.cancel, pending, self.discard_current),
                                        name='Tera transfer', daemon=True)
         self.worker.start()
 
@@ -618,11 +737,23 @@ class QueueManager:
             value, outcome = 'The share could not be reviewed. Check the connection and try again.', 'failed'
         self.post('_review_result', job_id=job.id, outcome=outcome, value=value)
 
-    def _transfer(self, job, cancel, pending):
+    def _transfer(self, job, cancel, pending, discard):
         def emit(action, **data):
             self.post(action, job_id=job.id, attempt=job.attempt, **data)
         try:
+            state = None
             if job.video:
+                def commit(record):
+                    return self.request('_checkpoint', job_id=job.id, attempt=job.attempt, checkpoint=record)
+                state = self._checkpoint_state(job, commit, discard)
+                def check_stopped():
+                    if cancel.is_set():
+                        raise Cancelled('Stopped.')
+                state.check = check_stopped
+                completed = state.reconcile()
+                if completed:
+                    emit('_result', outcome='completed', value=str(completed))
+                    return
                 # Other chosen folders on the same disk also consume the available space.
                 needed = required_space(job.folder, pending)
                 preflight(job.folder, needed, job.output_name or job.video['name'], job.video['fid'])
@@ -639,7 +770,7 @@ class QueueManager:
                 video = next((v for v in videos if v.fid == job.video['fid']), None)
                 if (video is None or video.size != job.video['size'] or video.name != job.video['name']
                         or job.identity and share_key(job.link, getattr(client, 'metadata', {})) != job.identity):
-                    raise DownloadError('The selected file changed or is no longer available. Add the share again.')
+                    raise RestartRequired('The selected file changed or is no longer available. Review it again before restarting.')
                 last = [0.0]
                 def update(received, total):
                     now = time.monotonic()
@@ -648,20 +779,27 @@ class QueueManager:
                         last[0] = now
                 if job.output_name:
                     video = replace(video, name=job.output_name)
-                value = str(client.download(video, job.folder, update))
+                value = str(client.download(video, job.folder, update, checkpoint=state))
                 outcome = 'completed'
         except Cancelled:
             outcome, value = 'cancelled', 'The operation was cancelled.'
+        except RestartRequired as error:
+            outcome, value = 'restart', str(error)
         except StorageError as error:
             outcome, value = 'storage', str(error)
         except OSError:
             outcome, value = 'storage', 'The file could not be saved. Check free space or choose another folder, then Resume.'
         except DownloadError as error:
-            outcome, value = 'failed', str(error)
+            outcome, value = ('login' if error.kind == 'login' else 'storage' if error.kind == 'storage' else 'failed'), str(error)
             if job.video and any(os.path.lexists(path) for path in target_paths(job.folder, job.output_name or job.video['name'], job.video['fid'])):
                 outcome, value = 'storage', 'A file or partial with this name exists. Rename, choose another folder, or Skip.'
+            emit('_result', outcome=outcome, value=value, kind=error.kind, retry_after=error.retry_after)
+            return
         except Exception:
             outcome, value = 'failed', 'The file could not be saved. Check the destination and connection, then retry.'
+        finally:
+            if discard.is_set() and state is not None:
+                state.discard_owned()
         emit('_result', outcome=outcome, value=value)
 
     def _snapshot(self):

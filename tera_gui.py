@@ -10,8 +10,8 @@ import tkinter as tk
 from tkinter import filedialog, simpledialog, ttk
 
 from app_state import default_data_dir
-from firefox_session import SessionError, profiles
-from queue_manager import QueueManager, TERMINAL, REVIEW
+from firefox_session import FirefoxProfile, SessionError, profiles
+from queue_manager import QueueManager, TERMINAL, REVIEW, HOLDS
 from terabox import DownloadError, TeraBox, open_firefox, parse_links
 
 
@@ -136,6 +136,10 @@ class TeraApp:
             button.pack(side='left', padx=(0, 6))
         ttk.Button(edit, text='Change folder…', command=lambda: self.change_destination(self.queue_tree)).pack(side='left')
         ttk.Button(edit, text='Rename…', command=lambda: self.rename_selected(self.queue_tree)).pack(side='left', padx=6)
+        self.restart_button = ttk.Button(edit, text='Restart from zero', command=self.restart_selected)
+        self.restart_button.pack(side='left')
+        self.retry_queue_button = ttk.Button(edit, text='Retry selected', command=lambda: self.send('retry', job_ids=list(self.queue_tree.selection())))
+        self.retry_queue_button.pack(side='left', padx=6)
         self.history_filter = tk.StringVar(value='All')
         filter_row = ttk.Frame(history_page)
         filter_row.pack(fill='x', pady=5)
@@ -148,6 +152,8 @@ class TeraApp:
         self.reveal_button.pack(side='left')
         self.clear_button = ttk.Button(filter_row, text='Clear history', command=lambda: self.send('clear_history'))
         self.clear_button.pack(side='left', padx=6)
+        self.restart_history_button = ttk.Button(filter_row, text='Restart from zero', command=lambda: self.restart_selected(self.history_tree))
+        self.restart_history_button.pack(side='left')
         self.history_tree = self._tree(history_page, ('name', 'status', 'finished', 'detail'),
                                        ('Video / share', 'Status', 'Finished', 'Detail'))
         self.queue_tree.bind('<<TreeviewSelect>>', lambda event: self.configure_controls())
@@ -167,7 +173,7 @@ class TeraApp:
         self.cancel_button = ttk.Button(actions, text='Cancel queue', command=lambda: self.send('cancel'))
         for button in (self.start_button, self.pause_button, self.boundary_button, self.skip_button, self.cancel_button):
             button.pack(side='left', padx=(0, 6))
-        ttk.Label(frame, text='Closing saves pending jobs. Interrupted files restart from zero in this version.', foreground='#555555').pack(anchor='w', pady=(8, 0))
+        ttk.Label(frame, text='Closing saves verified partial bytes. Continuation requires server validation; live TeraBox resume is unverified.', foreground='#555555', wraplength=950).pack(anchor='w', pady=(8, 0))
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.configure_controls()
         self.poll_id = root.after(50, self.poll)
@@ -207,14 +213,14 @@ class TeraApp:
         try:
             first = self.links_box.get('1.0', 'end').strip()
             links = parse_links(first) if first else []
-            open_firefox(self.profile_options.get(self.source.get()), links[0] if links else '')
+            open_firefox(self.login_profile(), links[0] if links else '')
         except DownloadError as error:
             self.status.set(str(error).split('\n')[0])
 
     def check_login(self):
         if self.login_busy:
             return
-        profile = self.profile_options.get(self.source.get())
+        profile = self.login_profile()
         if not profile:
             self.login_status.set('Select your Firefox profile first.')
             return
@@ -234,6 +240,14 @@ class TeraApp:
             self.ui_events.put(('login_done', text))
         self.login_thread = threading.Thread(target=work, name='Tera login', daemon=True)
         self.login_thread.start()
+
+    def login_profile(self):
+        selected = self.selected_queue_job()
+        job = next((j for j in (self.snapshot or {}).get('jobs', []) if j['id'] == selected and j['status'] == 'login'), None)
+        if job:
+            reference = job['profile']
+            return FirefoxProfile(reference['name'], Path(reference['path'])) if reference else None
+        return self.profile_options.get(self.source.get())
 
     def browse(self):
         chosen = filedialog.askdirectory(parent=self.root, title='Save videos to', initialdir=self.destination.get())
@@ -329,6 +343,11 @@ class TeraApp:
     def skip_selected(self):
         self.send('skip', job_id=self.selected_queue_job())
 
+    def restart_selected(self, tree=None):
+        selection = (tree or self.queue_tree).selection()
+        if selection:
+            self.send('restart', job_id=selection[0])
+
     def move(self, direction):
         identifier = self.selected_queue_job()
         if identifier:
@@ -375,12 +394,16 @@ class TeraApp:
         self.source_box.configure(state='readonly' if available and not working and not discovering and not self.login_busy else 'disabled')
         for widget in (self.login_button, self.check_button, self.disconnect_button):
             enabled(widget, available and not working and not discovering and not self.login_busy)
+        if snapshot.get('paused') and not snapshot.get('active'):
+            for widget in (self.login_button, self.check_button):
+                enabled(widget, available and not discovering and not self.login_busy)
         pending = any(j['status'] in {'pending', 'attention'} for j in snapshot.get('jobs', []))
         self.start_button.configure(text='Resume' if snapshot.get('paused') else 'Start queue')
-        enabled(self.start_button, available and not self.login_busy and not snapshot.get('stopping') and (snapshot.get('paused') or not working and pending))
+        unresolved = any(j['status'] in {'restart', 'login'} for j in snapshot.get('jobs', []))
+        enabled(self.start_button, available and not unresolved and not self.login_busy and not snapshot.get('stopping') and (snapshot.get('paused') or not working and pending))
         enabled(self.pause_button, available and bool(working) and not snapshot.get('paused'))
         enabled(self.boundary_button, available and bool(working) and not snapshot.get('paused') and not snapshot.get('pause_after'))
-        enabled(self.skip_button, available and (bool(snapshot.get('active')) or any(j['status'] == 'attention' for j in snapshot.get('jobs', []))))
+        enabled(self.skip_button, available and (bool(snapshot.get('active')) or any(j['status'] in HOLDS | {'retry_wait'} for j in snapshot.get('jobs', []))))
         enabled(self.cancel_button, available and bool(working or discovering))
         enabled(self.download_button, available and not self.login_busy and any(j['status'] == 'review' for j in snapshot.get('jobs', [])))
         enabled(self.review_saved_button, available and not discovering and any(j['status'] == 'unreviewed' for j in snapshot.get('jobs', [])))
@@ -389,8 +412,11 @@ class TeraApp:
         for widget in (self.up_button, self.down_button, self.remove_button):
             enabled(widget, available and selected.get('status') == 'pending')
         enabled(self.remove_button, available and selected.get('status') in {'pending', 'attention'})
+        enabled(self.restart_button, available and selected.get('id') != snapshot.get('active') and selected.get('status') in HOLDS | {'pending'} and not selected.get('source_blocked'))
+        enabled(self.retry_queue_button, available and selected.get('status') == 'login' and not selected.get('source_blocked'))
         history_selection = [jobs[i] for i in self.history_tree.selection() if i in jobs]
         enabled(self.retry_button, available and any(j['status'] == 'failed' and not j['source_blocked'] for j in history_selection))
+        enabled(self.restart_history_button, available and any(j['status'] == 'failed' and not j['source_blocked'] for j in history_selection))
         enabled(self.reveal_button, available and any(j['status'] == 'completed' for j in history_selection))
         enabled(self.clear_button, available and not working and any(j['status'] in TERMINAL for j in jobs.values()))
 

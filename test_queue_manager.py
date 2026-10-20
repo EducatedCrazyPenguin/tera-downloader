@@ -34,13 +34,13 @@ class Client(TeraBox):
         return [Video(name + '.mp4', 5, name, 'https://terabox.com/synthetic')
                 for name in ('first', 'second', 'third')]
 
-    def download(self, video, folder, progress):
+    def download(self, video, folder, progress, *, checkpoint=None):
         self.calls.append(('download', video.fid))
         while not self.release.wait(.01):
             self.check_cancel()
         if video.fid in self.fail:
             raise DownloadError('Synthetic file unavailable.')
-        return super().download(video, folder, progress)
+        return super().download(video, folder, progress, checkpoint=checkpoint)
 
     def open(self, *args, **kwargs):
         self.check_cancel()
@@ -223,7 +223,7 @@ class QueueTests(unittest.TestCase):
     def test_skip_inside_real_stream_cleans_partial_and_runs_next_file(self):
         started = threading.Event()
         class StreamingClient(Client):
-            def download(self, video, folder, progress):
+            def download(self, video, folder, progress, *, checkpoint=None):
                 def update(received, total):
                     progress(received, total)
                     if video.fid == 'first':
@@ -231,13 +231,15 @@ class QueueTests(unittest.TestCase):
                         while not self.cancel.wait(.01):
                             self.check_cancel()
                         self.check_cancel()
-                return TeraBox.download(self, video, folder, update)
+                return TeraBox.download(self, video, folder, update, checkpoint=checkpoint)
         self.stop_manager(self.manager)
         self.manager = self.make_manager(StreamingClient)
         self.manager.request('add', links=[LINK], folder=str(self.folder / 'videos'), profile=None)
         self.manager.request('start')
         self.assertTrue(started.wait(3))
-        self.assertTrue((self.folder / 'videos' / 'first.mp4.first.part').exists())
+        snapshot = self.manager.request('snapshot')
+        job = next(j for j in snapshot['jobs'] if j['id'] == snapshot['active'])
+        self.assertTrue((self.folder / 'videos' / ('.tera-' + job['checkpoint']['token'] + '.part')).exists())
         self.manager.request('skip')
         finished = self.wait_for(lambda s: not s['running'] and not s['active'])
         self.assertEqual([j['status'] for j in finished['jobs']], ['skipped', 'completed', 'completed'])

@@ -1,10 +1,12 @@
 # Tera roadmap implementation checklist
 
-Status: Deliveries A/B implemented locally on 19 October 2026. T01-T09 and checkpoints A1/A2/B passed the checks recorded below. Deliveries C-E remain pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
+Status: Deliveries A-C implemented locally through 20 October 2026. T01-T12 and local checkpoints A1/A2/B/C passed the checks recorded below. Delivery C's live-provider gate and Deliveries D/E remain pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
 
 **Evidence at the Delivery A checkpoint: 3/3 for that local scope — 47 offline tests and the isolated native Tkinter/real-entry-point smoke check passed on Python 3.12.10, Tk 8.6, and SQLite 3.49.1. B-E were then pending.**
 
-**Evidence: Delivery B 3/3 for the tested local/synthetic scope — 65 offline tests and the integrated withdrawn native smoke passed in the same environment. Whole-roadmap evidence remains 2/3; Deliveries C-E, real provider transfers, and long-pause reliability remain unverified.**
+**Evidence at the Delivery B checkpoint: 3/3 for the tested local/synthetic scope — 65 offline tests and the integrated withdrawn native smoke passed in the same environment. C-E were then pending; real provider transfers and long-pause reliability remained unverified.**
+
+**Evidence: Delivery C 3/3 for the checked local protocol/runtime scope — 91 offline tests, bounded loopback HTTP, forced process crash/recovery and the withdrawn native recovery flow passed. Whole-product evidence remains 2/3; live provider resume, power loss, large real files and D/E remain unverified.**
 
 ## Delivery A — Queue, persistence, and everyday use
 
@@ -72,26 +74,26 @@ Status: Deliveries A/B implemented locally on 19 October 2026. T01-T09 and check
 
 ## Delivery C — Recovery without corrupting files
 
-- [ ] T10 — Introduce owned durable checkpoints and save/exit recovery.
+- [x] T10 — Introduce owned durable checkpoints and save/exit recovery.
   - Acceptance: durable offsets never exceed synced bytes; only owned paths are recovered; save/exit retains work while explicit Cancel cleans up; interrupted finalization reconciles safely.
   - Verify: subprocess crash/restart tests, shorter/missing/extra-tail partials, existing targets, corrupted checkpoint data, and failed persistence.
   - Likely files: `app_state.py`, `terabox.py`, `queue_manager.py`, `test_app_state.py`, `test_terabox.py`.
   - Dependencies: T02/T08/T09. Scope: medium.
 
-- [ ] T11 — Implement strictly validated partial-response resume.
+- [x] T11 — Implement strictly validated partial-response resume.
   - Acceptance: append only after identity/strong-validator/range checks; ignored/invalid/changed responses request explicit restart; signed URLs are refreshed rather than stored.
   - Verify: bounded loopback HTTP fixture for valid and invalid responses, byte-exact final output, and privacy assertions; preserve all existing completion checks.
   - Likely files: `terabox.py`, `queue_manager.py`, `test_terabox.py`, `test_resume_http.py`, `smoke_terabox_gui.py`.
   - Dependencies: T10. Scope: medium.
 
-- [ ] T12 — Add classified errors and bounded recovery actions.
+- [x] T12 — Add classified errors and bounded recovery actions.
   - Acceptance: maximum two automatic attempts per cycle; cancellable Retry-After/default delay; no automatic full restart or anonymous fallback; meaningful Retry/Login/Folder/Restart actions.
   - Verify: fake-clock transport/API/storage/integrity classification and retry-budget persistence; synthetic expired-URL and login-required flows.
   - Likely files: `terabox.py`, `queue_manager.py`, `test_terabox.py`, `test_queue_manager.py`, `smoke_terabox_gui.py`.
   - Dependencies: T05/T10/T11. Scope: medium.
 
 - [ ] Provider gate — Only after a separate explicit live-check request, verify a small TeraBox sample's range/validator and refreshed-URL behavior. No full large-file transfer is implied.
-- [ ] Checkpoint C — Crash/restore and response-validation tests pass; report true resume as provider-verified or provider-pending, never assume synthetic success proves live support.
+- [x] Checkpoint C — Crash/restore and response-validation tests pass; report true resume as provider-verified or provider-pending, never assume synthetic success proves live support.
 
 ## Delivery D — Bandwidth, schedules, and run limits
 
@@ -148,3 +150,12 @@ No automatic task below authorizes real Firefox cookie checks, live downloads, v
 - All 65 offline tests passed with temporary directories rooted in the workspace on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. Inverting the free-space guard made its focused regression fail; the original source was restored afterward.
 - The withdrawn native Tkinter smoke verified checkbox selection and totals, exact input/alias duplicates, persistent exclusions, per-share destinations, rename and folder conflict correction, append/reorder/remove, favorites, mocked login, failed-save recovery, rapid pause/resume, finish-current hold, Cancel/control reset, byte-exact files, history/retry/clear, a stubbed Reveal action, save/exit, held restore and isolated real CLI startup/exit. Owned instances exit cleanly without pending Tk callbacks.
 - No real Firefox profile, provider traffic, shell window, installation or live download was used. Disk exhaustion/write failure uses offline injection; no real disk was filled. Source/native behavior is checked; provider resume, large files, installed packaging and Deliveries C-E remain pending. Interrupted files still restart from zero.
+
+## Delivery C verification record — 20 October 2026
+
+- `transfer_state.py` records generated partial ownership, immutable job binding, durable offset, prefix SHA-256, strong ETag and finalization phase. File flush/fsync precedes the coordinator's SQLite checkpoint commit. Recovery validates file identity and prefix, truncates only owned uncommitted tails, refuses short/missing/replaced/corrupt bytes and reconciles a ready final file only with matching recorded identity, size and hash. No schema migration or dependency was required; the original transport API still defaults to its previous cleanup behavior.
+- The queue now distinguishes Save/exit from Cancel/Skip/Remove/Restart. Exit keeps committed partial bytes; explicit discard actions remove only verified owned partials. Destination changes with an owned partial require Restart first. Restored jobs remain held without authentication/network work. Failed persistence retains the last stored offset and stops the worker. Clear history retains jobs that still own unfinished bytes.
+- Append requires the same selected metadata, a strong validator and exact 206 range/length. Ignored 200, 416, bad ranges, changed/missing validators and encoded/non-video responses never append or finalize. Media URLs are refreshed in memory, not saved. `recovery.py` bounds transient/expired-URL cycles to two attempts including the first, honors Retry-After/default five-second delay, persists the budget/due time and keeps manual holds above automatic retry. Login, storage, unknown API and integrity errors do not automatically restart or switch source.
+- All 91 offline tests passed on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1 with workspace temporary folders. The local socket restriction (`WinError 10013`) required an elevated test run for the owned 127.0.0.1 HTTP fixture. Hidden bounded subprocesses recorded their PIDs and exited at a synced body checkpoint and immediately before/after rename; all three restored exact synthetic files. This is process-crash evidence, not a power-loss test.
+- The native withdrawn smoke verifies saved partial bytes, a real Range request through the synthetic client, bounded recovery, a rejected 200 response, disabled Resume until explicit Restart, exact completed output and clean teardown, alongside the A/B workflow. Login and shell actions remain mocked; no real profile or provider was used. A deliberate removal of the ETag guard was detected by its focused regression and the original source restored.
+- The live-provider gate stays unchecked. No TeraBox Range/strong-validator stability, refreshed live URL, long real pause, full large-file transfer or installed package was verified. D/E remain pending. The A/B restart-from-zero statements above describe those historical checkpoints and are superseded by this conditional recovery behavior.

@@ -26,16 +26,24 @@
    shows overall known progress, speed and estimated time.
 7. The **History** tab shows completed, failed, skipped and cancelled items.
    Select failures and click **Retry selected failures**, then **Start queue**.
+   This starts a new recovery cycle. Transient connection/server errors get at
+   most two attempts including the first, honoring Retry-After or waiting five
+   seconds. Pause and Cancel interrupt the wait. Access, unknown API, storage and
+   verification errors do not automatically retry. **Login required** holds the
+   queue: select that row, use Check login/Login in Firefox for its saved source,
+   then **Retry selected** and Resume. No anonymous fallback is used.
    A failed share review returns to **Review saved shares** instead of downloading
    unreviewed files. To restart a cancelled/skipped file, review its share again.
    **Reveal folder** opens a saved destination only when clicked. **Clear history**
-   is available while idle, forgets completion duplicate markers, and never deletes
-   files or unfinished jobs.
+   is available while idle, forgets completion duplicate markers, and keeps files
+   and jobs that still own unfinished partial bytes.
 8. Clicking **X saves the queue and exits** after the current request stops.
    Reopening restores unfinished jobs and destinations without automatically
-   checking login or starting downloads. **Interrupted files restart from zero
-   in this version.** Cancel queue marks pending items cancelled; completed files
-   are always kept. Tray mode and schedules are not implemented yet.
+   checking login or starting downloads. **Owned partial bytes can continue only
+   after strict local and server validation.** If Tera shows **Restart required**,
+   select the row and explicitly choose **Restart from zero**, then Start/Resume.
+   Cancel queue deletes owned unfinished partials and marks pending items cancelled;
+   completed files are kept. Tray mode and schedules are not implemented yet.
 
 Repeated normalized inputs are discovered once while already in Review/Queue.
 Aliases are considered duplicates only when the provider reports matching share
@@ -49,10 +57,10 @@ before a file starts, then repeats the checks between files. A collision or disk
 failure holds the queue with **Needs attention**. Select the row and use
 **Rename…**, **Change folder…**, or **Skip**, then **Resume**. Existing files and
 unrelated `.part` files are never adopted or overwritten. Free-space checks do
-not reserve disk space against other apps. A mid-file storage failure cleans up
-the owned partial and restarts that file from zero after correction. Stop an
-active file before reviewing/restarting it at a new destination; partial files
-are not moved. Per-share folder names use a short identity hash, not a raw share
+not reserve disk space against other apps. A mid-file storage failure keeps its
+last committed prefix for validated continuation after correction. Changing an
+owned partial's name/folder requires explicit Restart from zero first; partial
+files are not moved. Per-share folder names use a short identity hash, not a raw share
 code or password.
 
 TeraBox aliases from `terasharelink.com`, `terasharefile.com`, and
@@ -84,6 +92,13 @@ expose cookie export, so signing in there alone does not connect this downloader
   are never stored in the queue. Protection/save failures are reported; there
   is no plaintext fallback. DPAPI is tied to the Windows account and does not
   protect against programs already running as that user.
+- Partial paths use random owned `.tera-….part` names. The local queue also stores
+  durable offsets, file identity, prefix hashes and representation validators.
+  It never stores the media URL; each transfer attempt resolves it again through
+  the same selected source. Recovery verifies ownership and the saved prefix,
+  and truncates only an owned uncommitted tail. Missing, shorter, replaced or
+  changed partials require explicit restart. Cancel, Skip, Remove pending and
+  Restart delete only a verified owned partial, never a completed video.
 - **Disconnect**, or selecting **No login**, disables future imports and blocks
   unfinished authenticated jobs. Re-add those shares with your chosen source;
   retry never silently switches them to anonymous access. Firefox login/data
@@ -105,25 +120,37 @@ Some shares do not provide download URLs without an authenticated session.
 
 Original files are kept temporary until the byte count matches the share size.
 Previews and HLS playlists are rejected. Existing files are not overwritten;
-cancelled or failed transfers remove only their own temporary file. A queue
+explicit cancellation removes only the owned temporary file. A queue
 continues after an individual link or video fails and shows the completed and
 failed items at the end. Pause keeps the current connection and downloaded bytes
 only while Tera stays open. A long pause can fail if the server closes the
-connection; there is no automatic reconnection or partial-byte recovery after
-closing Tera. Pending jobs are restored, but interrupted, cancelled or failed
-files restart from zero when started again. Rate
+connection. Recovery preserves committed bytes but never silently restarts a
+partially downloaded file. It appends only with a strong ETag, If-Range and an
+exact 206 Content-Range/length for the same selected file. A 200, 416, changed or
+missing validator, changed metadata or malformed response requires an explicit
+restart. The prefix is reread and hashed before continuation, which can take time
+for large files. Checkpoints follow file flush/fsync, normally every 1 MiB or two
+seconds and at pause/exit; finalization is also checkpointed and reconciled after
+a crash. These rules follow [HTTP range semantics](https://www.rfc-editor.org/rfc/rfc9110.html#section-14.2).
+**Live TeraBox range/validator support remains unverified:** a server may require
+Restart from zero even though the synthetic protocol checks pass. Rate
 limits, expired links, account limits, share restrictions and future TeraBox
 changes can still cause failures.
 
-Deliveries A/B verification passed **65 offline tests** and an isolated, withdrawn
+Deliveries A-C verification passed **91 offline tests** and an isolated, withdrawn
 native Tkinter smoke check on Python 3.12.10 / Tk 8.6 / SQLite 3.49.1. The checks
 covered encrypted storage, failed saves, backup/restore, process locking, queue
 edits, active-stream skip cleanup, history/retry, favorites, review/selection,
 duplicates/exclusions, disk/conflict handling, pause/rapid toggles, finish-current
 pause, byte-exact synthetic files, save/exit, held restoration and real isolated
-CLI startup/exit. The native check uses mocked login, provider and shell access;
+CLI startup/exit. New checks cover real loopback HTTP responses, hidden subprocess
+crashes during writing and before/after rename, verified continuation, corrupt
+checkpoints, failed saves, bounded retries and explicit Restart controls.
+The native check uses mocked login, provider and shell access;
 space exhaustion and write failures use deterministic offline fixtures. No real
 Firefox session or TeraBox download was used for this update.
+The sandbox blocks local sockets, so the loopback suite ran with the required
+local-network permission. Forced process crashes were tested; power loss was not.
 **Evidence: 2/3 — Local queue/UI behavior is directly tested; live-provider
 compatibility and full large-file transfer remain unverified.**
 
@@ -147,6 +174,7 @@ Diagnostics do not print cookie values, account identifiers or signed download U
 The [incorporation plan](tasks/plan.md) combines the requested heavy-download and
 personal-workflow improvements. Its [implementation checklist](tasks/todo.md)
 records completed deliveries and their local verification. Review/selection, duplicate/storage
-preflight and finish-current pause are now implemented in Delivery B. Durable
-partial resume, automatic retries, bandwidth/schedule/budget controls and
-tray/notifications remain pending in Deliveries C-E.
+preflight and finish-current pause are implemented in Delivery B. Delivery C adds
+owned checkpoints, conservative continuation and bounded retries, with live
+provider resume still pending. Bandwidth/schedule/budget controls and
+tray/notifications remain pending in Deliveries D/E.

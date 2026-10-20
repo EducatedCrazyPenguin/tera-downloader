@@ -27,7 +27,10 @@ VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.fl
 
 
 class DownloadError(Exception):
-    pass
+    def __init__(self, message, *, kind='unknown', retry_after=5):
+        super().__init__(message)
+        self.kind = kind
+        self.retry_after = retry_after
 
 
 class Cancelled(DownloadError):
@@ -155,9 +158,9 @@ class TeraBox:
         except Cancelled:
             raise
         except DownloadError:
-            raise DownloadError('TeraBox did not accept the saved Firefox session. Open TeraBox in that profile, sign in again if asked, then close Firefox and retry.') from None
+            raise DownloadError('TeraBox did not accept the saved Firefox session. Open TeraBox in that profile, sign in again if asked, then close Firefox and retry.', kind='login') from None
         if 'total' not in quota or 'used' not in quota:
-            raise DownloadError('TeraBox did not confirm account access. Refresh your login in Firefox.')
+            raise DownloadError('TeraBox did not confirm account access. Refresh your login in Firefox.', kind='login')
         self.authenticated = True
         return True
 
@@ -175,9 +178,14 @@ class TeraBox:
         try:
             return self.http.open(request, timeout=25)
         except urllib.error.HTTPError as error:
-            raise DownloadError(f'TeraBox returned HTTP {error.code}. No external fallback was used.') from None
+            from recovery import retry_delay
+            kind = ('transient' if error.code in (429, 500, 502, 503, 504) else
+                    'login' if error.code in (401, 403) else 'restart' if error.code == 416 else 'access')
+            delay = retry_delay(error.headers.get('Retry-After'))
+            error.close()
+            raise DownloadError(f'TeraBox returned HTTP {error.code}. No external fallback was used.', kind=kind, retry_after=delay) from None
         except (urllib.error.URLError, TimeoutError, OSError):
-            raise DownloadError('Could not connect to TeraBox directly. If Firefox also cannot open the share, your network is blocking or interrupting TeraBox; this app does not route around that restriction.') from None
+            raise DownloadError('Could not connect to TeraBox directly. If Firefox also cannot open the share, your network is blocking or interrupting TeraBox; this app does not route around that restriction.', kind='transient') from None
 
     def api(self, endpoint, params=None, body=None):
         query = {'app_id': 250528, 'web': 1, 'channel': 'dubox', 'clienttype': 0,
@@ -261,7 +269,7 @@ class TeraBox:
             raise
         except DownloadError as error:
             mode = 'with your Firefox session' if self.firefox_profile else 'without login'
-            raise DownloadError(f'The video is visible, but TeraBox did not provide a full-download link {mode}.\n\n' + str(error) + '\n\nNo preview or partial movie was saved.') from None
+            raise DownloadError(f'The video is visible, but TeraBox did not provide a full-download link {mode}.\n\n' + str(error) + '\n\nNo preview or partial movie was saved.', kind=error.kind, retry_after=error.retry_after) from None
         direct = result.get('dlink')
         if isinstance(direct, list):
             direct = direct[0].get('dlink') if direct else None
@@ -271,7 +279,10 @@ class TeraBox:
             raise DownloadError('TeraBox returned no original-file URL. No preview was saved.')
         return validate_url(direct)
 
-    def download(self, video, folder, progress=lambda received, total: None):
+    def download(self, video, folder, progress=lambda received, total: None, *, checkpoint=None):
+        if checkpoint is not None:
+            from transfer_state import download
+            return download(self, video, folder, progress, checkpoint)
         self.check_cancel()
         if video.size <= 0:
             raise DownloadError('TeraBox did not report a file size, so completeness cannot be verified.')

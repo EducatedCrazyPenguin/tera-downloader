@@ -1,9 +1,9 @@
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import terabox
-from tera_gui import duration_text, size_text
+from tera_gui import TeraApp, duration_text, size_text
 
 
 class EntryTests(unittest.TestCase):
@@ -16,6 +16,18 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(size_text(1024 ** 3), '1.0 GB')
         self.assertEqual(duration_text(None), '—')
         self.assertEqual(duration_text(3661), '1h 01m')
+
+    def test_held_login_action_uses_that_jobs_profile(self):
+        view = Mock()
+        view.selected_queue_job.return_value = 'held'
+        view.snapshot = {'jobs': [{'id': 'held', 'status': 'login', 'profile': {'name': 'Saved source', 'path': 'synthetic-profile'}}]}
+        view.profile_options = {'Other': None}
+        view.source.get.return_value = 'Other'
+        profile = TeraApp.login_profile(view)
+        self.assertEqual(profile.name, 'Saved source')
+        self.assertEqual(profile.path, Path('synthetic-profile'))
+        view.snapshot['jobs'][0]['profile'] = None
+        self.assertIsNone(TeraApp.login_profile(view))
 
 
 if __name__ == '__main__':
