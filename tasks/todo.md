@@ -7,9 +7,11 @@
 - [x] P03 — Allowlisted rotating activity log, About/Help and diagnostics export; test privacy, rotation and write failures.
 - [x] P04 — Packaged runtime, safe Downloads default, isolated data selection and installer mutex; test compatibility.
 - [x] P05 — Build self-contained Windows 0.1.0 installer; verify synthetic packaged/upgrade/installed shortcut flows.
-- [ ] P06 — Full offline suite, documentation, review, commit and push. Live-provider gate remains separate.
+- [x] P06 — Full offline suite, documentation, review, commit and push. Live-provider gate remains separate.
 
-21 October 2026: implementation and release verification complete; Git publication is the final P06 step.
+21 October 2026: implementation, installation and release verification complete.
+Implementation commits through `6788c55` were pushed to GitHub main; release
+completion is recorded in the following documentation checkpoint and `v0.1.0` tag.
 All **146 offline tests passed** on Python 3.12.10 / SQLite 3.49.1 / Tcl 8.6.15
 (Tk 8.6). Focused regressions additionally proved cancellation after the first
 hashed chunk and rejection of a mixed batch containing an owned saved partial.
