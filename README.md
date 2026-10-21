@@ -1,8 +1,50 @@
 # Tera — local TeraBox downloader
 
+## Windows release 0.1.0
+
+The personal Windows x64 package bundles Python, Tkinter and tray support. Run
+`Tera-0.1.0-Setup.exe`, then use **Tera** on the Desktop or Start menu. Python
+installation and `.pyw` associations are not needed for the packaged app.
+Installation is per user under `%LOCALAPPDATA%\Programs\Tera`; saved state stays
+under `%LOCALAPPDATA%\Tera`. No administrator access, autostart, browser launch,
+automatic update, reboot or post-install app launch is configured.
+
+Exit Tera before upgrading or uninstalling. A Windows mutex makes the installer
+refuse while Tera is running; it does not close the app. Installation and
+uninstall leave queue/settings, owned partial files and completed downloads in
+their separate locations. Keep the previous installer for rollback; this release
+does not change the database schema. These personal builds are unsigned.
+
+For a new destination, Tera uses the Windows Downloads folder's **Tera** subfolder,
+including redirected Downloads locations. Saved destinations take precedence.
+If Windows cannot resolve Downloads, select a folder before reviewing links.
+
+**Checking saved download: X of Y** shows verification of existing bytes before
+continuation or recovery of an interrupted final rename. This local checking is
+separate from network speed and run-byte accounting. Pause and Cancel remain
+available. Login, storage, restart, retry and download-window waits have distinct
+messages; checking does not imply the provider will support continuation.
+
+Review and History have filename search and sorting. Review's **Select visible**
+and **Deselect visible** affect only matching reviewed rows; hidden choices are
+kept and the selected total includes them. Queue order is changed only through
+Move up/down. **Change folder…** applies one picked folder to all highlighted
+eligible rows. If any selected row is active or owns partial bytes, no destination
+changes; stop the active file or explicitly Restart from zero first.
+
+**Help / About** displays the version and recovery guidance. **Save diagnostics…**
+creates a new JSON report containing version, allowlisted event/error codes,
+times, attempt counts and byte counts only. Choose a new report filename;
+existing files are never overwritten. `activity.log` and
+`activity.previous.log` hold at most 128 KiB each in the state directory. Raw
+exceptions, filenames, folders, links, account details and credentials are
+excluded; exports revalidate log entries and nothing is uploaded. Logging
+failure does not stop a download or replace the queue.
+
 ## Use it
 
-1. Double-click **Start Tera.pyw** on Windows (Python 3.10+ with Tkinter and
+1. Open the installed **Tera** shortcut. For source use, double-click
+   **Start Tera.pyw** on Windows (Python 3.10+ with Tkinter and
    the normal Python `.pyw` association). This opens Tera without a command window.
    **Start Tera.cmd** remains the explicit console/diagnostic fallback.
 2. Select your usual **Firefox profile**. Use **Login in Firefox** to open your
@@ -167,6 +209,8 @@ expose cookie export, so signing in there alone does not connect this downloader
   outside the repository. Existing `.tera-settings.json` is imported once without
   changing or deleting it. `--data-dir` selects an isolated store and does not
   import the real legacy settings; a second instance cannot own the same store.
+  `TERA_DATA_DIR` also selects isolated state; explicit `--data-dir` wins over
+  that environment variable. Neither isolated form imports legacy settings.
 - Saved source links and share access codes are encrypted with current-user
   Windows DPAPI. Filenames, destinations and history are local metadata and can
   be cleared. Cookies, account identifiers, page tokens and signed media URLs
@@ -250,9 +294,10 @@ notification opt-in/deduplication, preferences, safe failure logs and log rotati
 The sandbox rejected a Windows tray message-filter call, so the native tray test
 used the approved unsandboxed context. The original queue/recovery/run-limit
 Tkinter smoke still passed with optional packages absent from its interpreter.
-Real notification banners, Explorer restarts, sleep/resume and installed shortcut
-launch were not exercised. No Tera desktop shortcut or installer was found;
-this is a source-launcher release, not a packaged installation.
+At that Delivery E checkpoint, real notification banners, Explorer restarts,
+sleep/resume and installed shortcut launch were not exercised. That checkpoint
+was a source-launcher release; the later 0.1.0 packaging work is recorded in
+the personal-release checklist.
 
 ## Backup and rollback
 
@@ -285,6 +330,34 @@ python terabox.py --data-dir "C:\path\to\isolated-tera-state"
 ```
 
 Diagnostics do not print cookie values, account identifiers or signed download URLs.
+
+## Building and checking the Windows package
+
+Use Windows x64, Python 3.12.10 / Tcl 8.6.15, and the pinned build requirements.
+The source runtime remains independent of these build tools. Use Inno Setup
+7.1.0 x64's command-line compiler (the official signed installer supports
+portable mode); supply its path through `--iscc` if it is not in `.tools`.
+
+```powershell
+python -m venv .venv-build
+.\.venv-build\Scripts\python.exe -m pip install --only-binary=:all: -r requirements-build.txt
+.\.venv-build\Scripts\python.exe build_windows.py --iscc .tools\InnoSetup\ISCC.exe
+```
+
+The inspected build script creates `dist\Tera\Tera.exe`,
+`dist\Tera-0.1.0-Setup.exe`, a SHA256 file and logs under `build`. It does not
+launch Tera or install anything. Bundled third-party licenses are in
+`_internal\licenses`. The committed Tcl notice comes from the
+[8.6.15 upstream license](https://github.com/tcltk/tcl/blob/core-8-6-15/license.terms).
+Packaging follows [PyInstaller's one-folder guidance](https://pyinstaller.org/en/stable/operating-mode.html)
+and [Inno Setup's per-user installation](https://jrsoftware.org/ishelp/topic_setup_privilegesrequired.htm).
+
+Explicit synthetic package checks are available with `--self-test app` or
+`--self-test desktop` plus `--data-dir` pointing to a new disposable directory.
+The app check uses withdrawn Tk windows; the desktop check may briefly show its
+owned window/tray. Both mock provider/login access; notifications are intercepted.
+They create `self-test.log` and record success in `launcher.log`, and do not
+establish live provider compatibility. An existing self-test log is not replaced.
 
 ## Proposed product roadmap
 

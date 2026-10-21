@@ -1,5 +1,10 @@
 # Personal desktop release 0.1.0
 
+Implemented and installed 21 October 2026. The P01–P06 checklist in todo.md records
+146 passing offline tests, synthetic native/package checks, the installed tray
+and actual Desktop shortcut check, upgrade retention, artifact checksum, and the
+remaining live-provider limitations. Git publication is the final release step.
+
 Approved 20 October 2026. Extend the completed A–E roadmap below in four sequential slices: saved-byte verification/recovery feedback; filtered and sorted batch controls with atomic destination edits; private bounded diagnostics and About/Help; a self-contained per-user Windows installation. Track acceptance and verification in the P01–P06 checklist in todo.md. Keep the earlier live-provider gate pending.
 
 Use optional checkpoint verification callbacks and transient attempt-tagged queue snapshot fields, without a database migration. Search/sort Review and History only; Select/Deselect visible preserves hidden choices. Batch destination changes validate every selected job before a single save and preserve all jobs on failure.

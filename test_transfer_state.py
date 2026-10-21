@@ -84,14 +84,22 @@ class TransferStateTests(unittest.TestCase):
         self.assertEqual(events, [(0, len(BODY)), (len(BODY), len(BODY))])
 
     def test_cancel_during_verification_keeps_saved_prefix_and_closes_file(self):
-        path = self.partial()
-        state = self.state()
+        body = b'x' * (2 * 1024 * 1024)
+        state = Checkpoint(self.saved, self.folder, 'large.mp4', len(body), 'binding', self.commit, self.discard)
+        with state.open_partial() as output:
+            output.write(body)
+            state.sync(output, hashlib.sha256(body), len(body), '"version-1"')
+        path, events = state.path, []
+        def checking(done, total):
+            events.append((done, total))
         def cancelled():
-            raise Cancelled('Synthetic cancellation')
-        state.check = cancelled
+            if any(done for done, total in events):
+                raise Cancelled('Synthetic cancellation after the first hashed chunk')
+        state.verification, state.check = checking, cancelled
         with self.assertRaises(Cancelled):
             state.open_partial()
-        self.assertEqual(path.read_bytes(), BODY[:400])
+        self.assertEqual(events, [(0, len(body)), (1024 * 1024, len(body))])
+        self.assertEqual(path.read_bytes(), body)
         path.rename(path.with_suffix('.held'))
 
     def test_invalid_ranges_validators_and_representations_never_append(self):

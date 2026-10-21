@@ -101,6 +101,23 @@ class QueueFixture(unittest.TestCase):
 
 class DeliveryCTests(QueueFixture):
 
+    def test_batch_folder_change_rejects_owned_partial_before_changing_other_rows(self):
+        self.start()
+        self.assertTrue(Client.started.wait(3))
+        self.stop(self.manager)
+        self.manager = self.make_manager()
+        self.manager.request('add', links=['https://terabox.com/s/1anotherx'], folder=str(self.folder / 'other'), profile=None)
+        before = self.manager.request('snapshot')
+        owned, other = before['jobs']
+        path = Path(owned['folder']) / ('.tera-' + owned['checkpoint']['token'] + '.part')
+        prefix = path.read_bytes()
+        calls = len(Client.calls)
+        with self.assertRaises(StateError):
+            self.manager.request('destinations', job_ids=[other['id'], owned['id']], folder=str(self.folder / 'changed'))
+        self.assertEqual(self.manager.request('snapshot')['jobs'], before['jobs'])
+        self.assertEqual(path.read_bytes(), prefix)
+        self.assertEqual(len(Client.calls), calls)
+
     def test_save_exit_keeps_durable_bytes_and_reopen_uses_range(self):
         self.start()
         self.assertTrue(Client.started.wait(3))

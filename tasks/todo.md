@@ -2,14 +2,50 @@
 
 ## Personal release 0.1.0 — approved 20 October 2026
 
-- [ ] P01 — Saved-byte verification progress and distinct recovery/wait messages; test cancellation, stale events and counters.
-- [ ] P02 — Review/History search and sorting, visible selection, atomic batch destinations; test persistence and failures.
-- [ ] P03 — Allowlisted rotating activity log, About/Help and diagnostics export; test privacy, rotation and write failures.
-- [ ] P04 — Packaged runtime, safe Downloads default, isolated data selection and installer mutex; test compatibility.
-- [ ] P05 — Build self-contained Windows 0.1.0 installer; verify synthetic packaged/upgrade/installed shortcut flows.
+- [x] P01 — Saved-byte verification progress and distinct recovery/wait messages; test cancellation, stale events and counters.
+- [x] P02 — Review/History search and sorting, visible selection, atomic batch destinations; test persistence and failures.
+- [x] P03 — Allowlisted rotating activity log, About/Help and diagnostics export; test privacy, rotation and write failures.
+- [x] P04 — Packaged runtime, safe Downloads default, isolated data selection and installer mutex; test compatibility.
+- [x] P05 — Build self-contained Windows 0.1.0 installer; verify synthetic packaged/upgrade/installed shortcut flows.
 - [ ] P06 — Full offline suite, documentation, review, commit and push. Live-provider gate remains separate.
 
-Evidence: 2/3 — Approved implementation scope; new release behavior and installation not yet verified.
+21 October 2026: implementation and release verification complete; Git publication is the final P06 step.
+All **146 offline tests passed** on Python 3.12.10 / SQLite 3.49.1 / Tcl 8.6.15
+(Tk 8.6). Focused regressions additionally proved cancellation after the first
+hashed chunk and rejection of a mixed batch containing an owned saved partial.
+The source native harness passed (PID 13156), then the bundled runtime and
+installed executable passed the extended app and native tray harnesses with
+synthetic downloads, mocked profile/network access and intercepted notifications.
+The final installed app/tray PIDs were 27552/29472; both exited cleanly.
+
+The synthetic installer 0.0.0-to-0.1.0 upgrade/uninstall preserved the saved queue,
+preferences, schema version 1 and exact partial bytes. This fixture used the same
+current application payload with different installer versions; it does not prove
+migration from arbitrary older application data. Holding the actual application
+mutex made installation refuse without altering the executable. No shortcuts
+were created by the disposable installer fixture.
+
+Installed version **0.1.0** at `%LOCALAPPDATA%\Programs\Tera`; verified the executable
+hash against the build and checked Desktop/Start-menu target, working directory,
+icon and empty arguments. Launched the actual Desktop shortcut (PID 28256) with
+`TERA_DATA_DIR`, empty test APPDATA/LOCALAPPDATA and Python removed from PATH.
+The installed app held its isolated state lock and saved/exited on its owned
+WM_CLOSE. All task-owned final app/installer processes exited. No real Firefox
+cookies, provider calls, downloads or notification banners were used.
+
+Artifact: `dist/Tera-0.1.0-Setup.exe`, SHA256
+`89c8df054040f4119fbd3b02048fc137b2ed6ab0b922a386dd3a4b3c1d07220b`.
+The build used pinned PyInstaller 6.22.3 and signature-verified portable Inno Setup
+7.1.0 x64. Upstream Inno installer SHA256:
+`0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f`.
+The Tera installer itself is unsigned. Previous version-named installers are
+retained in dist; this is the first packaged release.
+
+**Evidence: 3/3 for the checked local/source/packaged/installed flows; whole-product
+evidence remains 2/3 because live provider resume, large real transfers, long
+server pauses, sleep/wake, Explorer recovery, real notifications and power loss
+remain unverified. A clean Windows machine without Python installed was not
+available; the bundled runtime was checked with Python absent from PATH.**
 
 Status: Deliveries A-E implemented locally through 20 October 2026. T01-T17 and all local delivery checkpoints passed the checks recorded below. Delivery C's live-provider gate remains pending. The authoritative behavior, defaults, capability map, and evidence limitations are in [plan.md](plan.md).
 

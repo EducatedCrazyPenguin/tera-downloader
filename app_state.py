@@ -51,6 +51,11 @@ def unprotect(data):
     return _crypt(data, True)
 
 
+def data_override(value=None):
+    selected = value if value is not None else os.environ.get('TERA_DATA_DIR')
+    return Path(selected).resolve() if selected else None
+
+
 def default_data_dir():
     location = os.environ.get('LOCALAPPDATA')
     if not location:

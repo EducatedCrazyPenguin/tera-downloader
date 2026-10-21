@@ -214,10 +214,10 @@ def check_run_limits(base):
                 except tk.TclError: pass
 
 
-def main():
+def main(workspace=None):
     print(f'Smoke PID {os.getpid()}; native Tk {tk.TkVersion}; withdrawn windows; synthetic data only', flush=True)
     SyntheticClient.calls, SyntheticClient.fail_once = [], True
-    with tempfile.TemporaryDirectory(prefix='tera-smoke-', dir=Path(__file__).parent) as directory, \
+    with tempfile.TemporaryDirectory(prefix='tera-smoke-', dir=workspace or Path(__file__).parent) as directory, \
          patch('urllib.request.OpenerDirector.open', side_effect=AssertionError('Unexpected network')), \
          patch('tera_gui.profiles', side_effect=AssertionError('Unexpected real profile read')):
         base = Path(directory)
@@ -483,7 +483,7 @@ def main():
             return app
         with patch('sys.argv', ['terabox.py', '--data-dir', str(base / 'cli-state')]), \
              patch('tkinter.Tk', side_effect=owned_root), patch('tera_gui.TeraApp', side_effect=startup_app):
-            runpy.run_path(str(Path(__file__).parent / 'terabox.py'), run_name='__main__')
+            terabox.main()
         assert startup['passed']
         startup['app'].manager.thread.join(1)
         assert startup['app'].manager.closed.is_set()

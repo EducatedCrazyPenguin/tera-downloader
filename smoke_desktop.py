@@ -155,7 +155,11 @@ def launcher_check(base):
     pid = None
     with (base / 'process.log').open('w') as log:
         try:
-            parent = subprocess.Popen([str(pythonw), str(Path(__file__).with_name('Start Tera.pyw')), '--data-dir', str(state)],
+            command = [sys.executable] if getattr(sys, 'frozen', False) else [str(pythonw), str(Path(__file__).with_name('Start Tera.pyw'))]
+            environment.update(TERA_DATA_DIR=str(state), PYTHONPATH='', PYTHONHOME='')
+            if getattr(sys, 'frozen', False):
+                environment['PATH'] = os.environ.get('SystemRoot', r'C:\Windows') + r'\System32'
+            parent = subprocess.Popen(command + ['--data-dir', str(state)],
                                       cwd=str(Path(__file__).parent), env=environment, stdin=subprocess.DEVNULL,
                                       stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
             print(f'Owned quiet launcher PID: {parent.pid}', flush=True)
@@ -175,7 +179,10 @@ def launcher_check(base):
             handle = kernel32.OpenProcess(0x100000, False, pid)
             assert handle
             # The first process hands off before any queue store is opened.
-            assert parent.wait(timeout=2) == 0 and pid != parent.pid
+            if getattr(sys, 'frozen', False):
+                assert pid == parent.pid
+            else:
+                assert parent.wait(timeout=2) == 0 and pid != parent.pid
             try:
                 with StateStore(state):
                     raise AssertionError('Running launcher did not own its state lock')
@@ -204,16 +211,17 @@ def launcher_check(base):
                 parent.wait(2)
 
 
-def main():
+def main(workspace=None):
     assert os.name == 'nt' and available(), 'Run with the optional desktop environment on Windows'
     print(f'Owned desktop smoke PID: {os.getpid()}', flush=True)
-    with tempfile.TemporaryDirectory(prefix='tera-desktop-', dir=Path(__file__).parent) as folder:
+    with tempfile.TemporaryDirectory(prefix='tera-desktop-', dir=workspace or Path(__file__).parent) as folder:
         base = Path(folder)
         tempfile.tempdir = str(base)
         tray_check(base)
         launcher_check(base / 'launcher')
     print('PASS: native tray readiness/hide/restore/pause/resume/cancel/reset/exit; one mocked generic notification; failed backend stays accessible')
-    print('PASS: real quiet .pyw / pythonw handoff, isolated state owner, WM_CLOSE save/exit, no remaining owned window/process')
+    print('PASS: real quiet packaged startup, isolated state owner, WM_CLOSE save/exit, no remaining owned process' if getattr(sys, 'frozen', False)
+          else 'PASS: real quiet .pyw / pythonw handoff, isolated state owner, WM_CLOSE save/exit, no remaining owned window/process')
 
 
 if __name__ == '__main__':

@@ -12,3 +12,8 @@ cookies*
 *.log
 *.png
 .venv-desktop/
+.venv-build/
+.tools/
+build/
+dist/
+release-checks/

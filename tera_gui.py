@@ -11,7 +11,8 @@ import time
 import tkinter as tk
 from tkinter import filedialog, simpledialog, ttk
 
-from app_state import default_data_dir
+from app_state import default_data_dir, data_override
+from windows_runtime import application_mutex, downloads_directory
 from firefox_session import FirefoxProfile, SessionError, profiles
 from queue_manager import QueueManager, TERMINAL, REVIEW, HOLDS
 from terabox import DownloadError, TeraBox, open_firefox, parse_links
@@ -119,7 +120,8 @@ class TeraApp:
         self.links_box.pack(fill='x', pady=(4, 6))
         folder_row = ttk.Frame(frame)
         folder_row.pack(fill='x')
-        self.destination = tk.StringVar(value=str(Path(__file__).parent / 'downloads'))
+        default_downloads = downloads_directory()
+        self.destination = tk.StringVar(value=str(default_downloads) if default_downloads else '')
         self.destination_entry = ttk.Entry(folder_row, textvariable=self.destination)
         self.destination_entry.pack(side='left', fill='x', expand=True)
         self.browse_button = ttk.Button(folder_row, text='Save to…', command=self.browse)
@@ -774,8 +776,10 @@ class TeraApp:
 
 
 def gui(data_dir=None):
-    root = tk.Tk()
-    legacy = Path(__file__).parent / '.tera-settings.json' if data_dir is None else None
-    manager = QueueManager(data_dir or default_data_dir(), legacy_settings=legacy)
-    TeraApp(root, manager)
-    root.mainloop()
+    data_dir = data_override(data_dir)
+    with application_mutex():
+        root = tk.Tk()
+        legacy = Path(__file__).parent / '.tera-settings.json' if data_dir is None else None
+        manager = QueueManager(data_dir or default_data_dir(), legacy_settings=legacy)
+        TeraApp(root, manager)
+        root.mainloop()
