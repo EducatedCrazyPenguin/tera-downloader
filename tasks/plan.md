@@ -1,3 +1,17 @@
+# Quick-start redesign 0.2.0
+
+The user selected quick start (paste links and download all videos; selection is
+optional) and the Cinema programme direction. Keep Tkinter, the existing queue,
+privacy, recovery, run limits and saved state. Put occasional configuration in
+Settings, maintenance in native File actions, and keep filenames and transfer
+controls usable at the minimum window with enlarged text. Track the source,
+packaged and installed checks separately in todo.md; DESIGN.md records the built
+system. No dependency or database-schema change is introduced.
+
+**Evidence: 3/3 for confirmed intent, inspected implementation and synthetic source
+checks; whole-product evidence remains 2/3 while live-provider reliability is
+unverified. This section supersedes the earlier review-first entry workflow.**
+
 # Personal desktop release 0.1.0
 
 Implemented and installed 21 October 2026. The P01–P06 checklist in todo.md records

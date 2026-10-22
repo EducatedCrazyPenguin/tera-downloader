@@ -77,6 +77,95 @@ class DeliveryBTests(unittest.TestCase):
         self.assertEqual(Path(done['jobs'][0]['path']).read_bytes(), b'movie')
         self.assertEqual([c[1] for c in Client.calls if c[0] == 'download'], ['first'])
 
+    def test_quick_start_downloads_all_without_changing_optional_review(self):
+        reviewed = self.review()['jobs']
+        Client.release.set()
+        self.manager.request('download_now', links=[LINK.replace('synthetic', 'anotherx')],
+                             folder=str(self.folder / 'quick'), profile=None, per_share=True)
+        done = self.wait(lambda s: not s['review_busy'] and not s['running'] and any(j['status'] == 'completed' for j in s['jobs']))
+        self.assertEqual([j['status'] for j in done['jobs'][:3]], ['review'] * 3)
+        self.assertEqual([j['id'] for j in done['jobs'][:3]], [j['id'] for j in reviewed])
+        self.assertTrue(all(Path(j['path']).read_bytes() == b'movie' for j in done['jobs'][3:]))
+        self.assertTrue(all(Path(j['folder']).parent == self.folder / 'quick' for j in done['jobs'][3:]))
+
+    def test_quick_start_preserves_pause_and_deduplicates(self):
+        jobs = self.review()['jobs']
+        self.manager.request('select', job_ids=[j['id'] for j in jobs])
+        self.wait(lambda s: s['active'])
+        self.manager.request('pause')
+        self.manager.request('download_now', links=[LINK, LINK.replace('synthetic', 'anotherx')],
+                             folder=str(self.folder / 'quick'), profile=None)
+        held = self.wait(lambda s: not s['review_busy'])
+        self.assertTrue(held['manual_paused'])
+        self.assertEqual(len(held['jobs']), 6)
+        self.assertEqual(sum(j['status'] == 'pending' for j in held['jobs']), 5)
+        self.manager.request('cancel')
+        self.wait(lambda s: not s['active'])
+        self.assertFalse(self.manager.quick_requested)
+
+    def test_quick_start_save_failure_does_not_discover_or_start(self):
+        with patch.object(self.manager.store, 'save_jobs', side_effect=StateError('Synthetic save failure')):
+            with self.assertRaises(StateError):
+                self.manager.request('download_now', links=[LINK], folder=str(self.folder), profile=None)
+        self.assertEqual(Client.calls, [])
+        self.assertFalse(self.manager.quick_requested)
+        self.assertEqual(self.manager.request('snapshot')['jobs'], [])
+
+    def test_close_during_quick_discovery_restores_without_automatic_start(self):
+        entered = threading.Event()
+        class SlowQuick(ReviewClient):
+            def find_videos(self, link):
+                entered.set()
+                self.cancel.wait(2)
+                self.check_cancel()
+                return super().find_videos(link)
+        self.stop(self.manager)
+        self.manager = self.make_manager(SlowQuick)
+        self.manager.request('download_now', links=[LINK], folder=str(self.folder / 'videos'), profile=None)
+        self.assertTrue(entered.wait(2))
+        self.stop(self.manager)
+        self.manager = self.make_manager()
+        restored = self.manager.request('snapshot')
+        self.assertEqual([j['status'] for j in restored['jobs']], ['unreviewed'])
+        self.assertFalse(restored['running'] or restored['review_busy'])
+        self.assertEqual(Client.calls, [])
+
+    def test_quick_start_all_duplicates_explains_no_new_download(self):
+        Client.release.set()
+        self.manager.request('download_now', links=[LINK], folder=str(self.folder / 'videos'), profile=None)
+        self.wait(lambda s: not s['review_busy'] and not s['running'] and len(s['jobs']) == 3)
+        self.manager.request('download_now', links=[LINK.replace('terabox.com', 'terasharelink.com')],
+                             folder=str(self.folder / 'other'), profile=None)
+        done = self.wait(lambda s: not s['review_busy'])
+        self.assertEqual(sum(j['status'] == 'excluded' for j in done['jobs']), 3)
+        self.assertIn('No new videos', done['message'])
+        self.assertEqual(sum(c[0] == 'download' for c in Client.calls), 3)
+
+    def test_failed_quick_discovery_does_not_start_older_pending_jobs(self):
+        jobs = self.review()['jobs']
+        self.manager.request('select', job_ids=[j['id'] for j in jobs], start=False)
+        with patch.object(ReviewClient, 'find_videos', side_effect=StorageError('Synthetic discovery failure.')):
+            self.manager.request('download_now', links=[LINK.replace('synthetic', 'anotherx')], folder=str(self.folder), profile=None)
+            done = self.wait(lambda s: not s['review_busy'])
+        self.assertFalse(done['running'] or done['active'])
+        self.assertEqual(done['message'], 'Synthetic discovery failure.')
+        self.assertEqual(sum(j['status'] == 'pending' for j in done['jobs']), 3)
+        self.assertFalse(any(c[0] == 'download' for c in Client.calls))
+
+    def test_quick_batch_keeps_successful_share_when_another_discovery_fails(self):
+        original = ReviewClient.find_videos
+        def listing(client, link):
+            if 'another' in link:
+                raise StorageError('Synthetic discovery failure.')
+            return original(client, link)
+        Client.release.set()
+        with patch.object(ReviewClient, 'find_videos', listing):
+            self.manager.request('download_now', links=[LINK, LINK.replace('synthetic', 'anotherx')],
+                                 folder=str(self.folder / 'videos'), profile=None)
+            done = self.wait(lambda s: not s['review_busy'] and not s['running'] and len(s['jobs']) == 4)
+        self.assertEqual([j['status'] for j in done['jobs']], ['completed'] * 3 + ['failed'])
+        self.assertTrue(all(Path(j['path']).read_bytes() == b'movie' for j in done['jobs'][:3]))
+
     def test_authoritative_aliases_and_missing_receipt_are_rechecked(self):
         reviewed = self.review()
         self.manager.request('select', job_ids=[j['id'] for j in reviewed['jobs']], start=False)

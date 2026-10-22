@@ -130,8 +130,9 @@ class QueueManager:
         self.review_worker = None
         self.review_cancel = threading.Event()
         self.review_requested = set()
+        self.quick_requested = set()
         self.review_space = {}
-        self.message = 'Add links, then Start. Restored jobs wait for your instruction.'
+        self.message = 'Paste links and Download now. Restored jobs wait for Start.'
         self.run_ids = set()
         self.meter = SpeedMeter()
         store = None
@@ -199,6 +200,7 @@ class QueueManager:
                 except (StateError, DownloadError, OSError, ValueError) as error:
                     # Failed persistence must stop further transfers, not silently lose changes.
                     if isinstance(error, StateError):
+                        self.quick_requested.clear()
                         self.running = False
                         self.pause.set()
                         self.error_hold = True
@@ -355,7 +357,7 @@ class QueueManager:
                 job.status = 'review' if selected else 'excluded'
             self._save()
             return
-        if action == 'review':
+        if action in {'review', 'download_now'}:
             links = parse_links('\n'.join(data['links']))
             folder = str(Path(data['folder']).resolve())
             profile = data.get('profile')
@@ -378,11 +380,13 @@ class QueueManager:
                     added.append(job)
             self._save()
             self.review_requested.update(j.id for j in added)
+            if action == 'download_now':
+                self.quick_requested.update(j.id for j in added)
             if self.error_hold and not self.active:
                 self.error_hold = False
                 self.pause.clear()
                 self.acknowledged = False
-            self.message = 'Reading shares for review…' if added else 'These shares are already in Review or Queue.'
+            self.message = ('Finding videos to download…' if action == 'download_now' else 'Reading shares for review…') if added else 'These shares are already in Review or Queue.'
             self.events.put(('added', [job.id for job in added]))
             return [job.id for job in added]
         if action == 'select':
@@ -440,6 +444,8 @@ class QueueManager:
             if data['job_id'] != self.review_active:
                 return
             job = self._job(data['job_id'])
+            quick = job.id in self.quick_requested
+            self.quick_requested.discard(job.id)
             self.review_worker.join(1)
             self.review_worker, self.review_active = None, None
             if self.closing or self.review_cancel.is_set() or data['outcome'] == 'cancelled':
@@ -456,14 +462,29 @@ class QueueManager:
                     item.error = self._duplicate(item, in_review=True)
                     if item.error:
                         item.status = 'excluded'
+                    elif quick:
+                        item.status = 'pending'
+                        if self.running:
+                            self.run_ids.add(item.id)
                 try:
                     self.review_space[folder] = available_space(folder)
                 except OSError:
                     self.review_space[folder] = None
-                self.message = f'{len(videos)} video(s) ready for review. Choose files, then Download selected.' if not self.running else self.message
+                if not self.running:
+                    self.message = ('Videos queued. Resume when ready.' if self.pause.is_set() else 'Videos queued for download.') if quick else f'{len(videos)} video(s) ready. Choose files, then Download selected.'
+                    if quick and not any(item.status == 'pending' for item in reviewed):
+                        self.message = 'No new videos to download. Check Choose videos for duplicate details.'
             else:
                 job.status, job.error, job.finished = 'failed', data['value'], time.time()
+                if quick:
+                    self.message = job.error
             self._save()
+            if (quick and data['outcome'] == 'discovered' and any(item.status == 'pending' for item in reviewed)
+                    and not self.running and not self.pause.is_set()
+                    and not self.closing and not self.error_hold
+                    and not any(j.status in HOLDS for j in self.jobs)
+                    and self.policy.reason() not in {'bytes', 'deadline', 'recovery'}):
+                self._handle('start', {})
             return
         if action == 'add':
             links = parse_links('\n'.join(data['links']))
@@ -576,6 +597,7 @@ class QueueManager:
             self._discard(job)
             self.jobs.remove(job)
             self.review_requested.discard(job.id)
+            self.quick_requested.discard(job.id)
             self._save()
             return
         if action == 'retry':
@@ -615,6 +637,7 @@ class QueueManager:
                 self.pause.clear()
                 self.review_cancel.set()
                 self.review_requested.clear()
+                self.quick_requested.clear()
                 if action == 'cancel':
                     self.policy.finish()
                 for job in self.jobs:

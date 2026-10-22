@@ -35,7 +35,7 @@ def main():
     build.mkdir(exist_ok=True)
     os.environ.update(TEMP=str(build), TMP=str(build), PYINSTALLER_CONFIG_DIR=str(build / 'pyinstaller-cache'))
     from PIL import Image, ImageDraw
-    image = Image.new('RGB', (256, 256), '#175c67')
+    image = Image.new('RGB', (256, 256), '#A5262D')
     draw = ImageDraw.Draw(image)
     draw.rectangle((48, 48, 207, 95), fill='white')
     draw.rectangle((104, 80, 151, 211), fill='white')

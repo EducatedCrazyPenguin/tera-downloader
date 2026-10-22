@@ -1,9 +1,9 @@
 # Tera — local TeraBox downloader
 
-## Windows release 0.1.0
+## Windows release 0.2.0
 
 The personal Windows x64 package bundles Python, Tkinter and tray support. Run
-`Tera-0.1.0-Setup.exe`, then use **Tera** on the Desktop or Start menu. Python
+`Tera-0.2.0-Setup.exe`, then use **Tera** on the Desktop or Start menu. Python
 installation and `.pyw` associations are not needed for the packaged app.
 Installation is per user under `%LOCALAPPDATA%\Programs\Tera`; saved state stays
 under `%LOCALAPPDATA%\Tera`. No administrator access, autostart, browser launch,
@@ -32,7 +32,7 @@ Move up/down. **Change folder…** applies one picked folder to all highlighted
 eligible rows. If any selected row is active or owns partial bytes, no destination
 changes; stop the active file or explicitly Restart from zero first.
 
-**Help / About** displays the version and recovery guidance. **Save diagnostics…**
+**Settings → Help / About** displays the version and recovery guidance. **Save diagnostics…**
 creates a new JSON report containing version, allowlisted event/error codes,
 times, attempt counts and byte counts only. Choose a new report filename;
 existing files are never overwritten. `activity.log` and
@@ -47,25 +47,30 @@ failure does not stop a download or replace the queue.
    **Start Tera.pyw** on Windows (Python 3.10+ with Tkinter and
    the normal Python `.pyw` association). This opens Tera without a command window.
    **Start Tera.cmd** remains the explicit console/diagnostic fallback.
-2. Select your usual **Firefox profile**. Use **Login in Firefox** to open your
+2. In **Settings → Firefox login**, select your usual **Firefox profile**. Use **Login in Firefox** to open your
    share and sign into TeraBox in a normal tab; **Check login** verifies it.
 3. Paste share links one per line or separated by commas, choose a destination,
-   then click **Review links**. Invalid links are reported inline. Your last
-   destination is remembered; **Save favorite…** names folders you use often.
-   Optionally enable **Use a separate folder for each share** before reviewing.
-4. In **Review**, click a video's checkbox (or select it and press Space) to
+   then click **Download now** to discover and queue all eligible videos. Invalid
+   links are reported inline. Your last destination is remembered. **Add links**
+   returns to Downloads; **Settings → General** holds favorites, separate-share
+   folders, tray and notification options. Existing pauses and run limits remain
+   in force. Restored queues still wait for Start; interrupted discovery needs
+   an explicit **Review saved** rather than starting automatically.
+4. For optional selection, click **Choose videos…** instead. In **Choose videos**,
+   click a video's checkbox (or select it and press Space) to
    include/exclude it. The view shows file sizes, destinations and selected bytes.
    **Download selected** starts those files, or appends them to the running queue.
    It preserves an existing pause. Review and exclusions survive reopening;
-   **Review saved shares** explicitly discovers an interrupted review.
-5. Review more links while downloading. In **Queue**, select pending rows to
+   **Review saved** explicitly discovers an interrupted review.
+5. Add more links while downloading. In **Downloads**, select a file, then use
+   **File actions** to
    **Move up**, **Move down**, or **Remove pending**. **Change folder…** and
    **Rename…** work on reviewed, pending or held files. **Skip** stops the active
    file, or skips a selected held file when no transfer is active. It removes
    only that attempt's owned temporary file and preserves completed files.
 6. **Pause now** holds the active transfer and queue. **Pausing…** waits for an
    in-flight read; **Paused** confirms the worker has stopped reading. Click
-   **Resume** to continue while Tera remains open. **Finish current, then pause**
+   **Resume** to continue while Tera remains open. **Pause after file**
    lets the active file finish and starts no next file until Resume. The dashboard
    shows overall known progress, speed and estimated time.
 7. The **History** tab shows completed, failed, skipped and cancelled items.
@@ -76,7 +81,7 @@ failure does not stop a download or replace the queue.
    verification errors do not automatically retry. **Login required** holds the
    queue: select that row, use Check login/Login in Firefox for its saved source,
    then **Retry selected** and Resume. No anonymous fallback is used.
-   A failed share review returns to **Review saved shares** instead of downloading
+   A failed share review returns to **Review saved** instead of downloading
    unreviewed files. To restart a cancelled/skipped file, review its share again.
    **Reveal folder** opens a saved destination only when clicked. **Clear history**
    is available while idle, forgets completion duplicate markers, and keeps files
@@ -155,7 +160,7 @@ code or password.
 
 ## Run limits
 
-Use the **Run limits** tab and click **Apply limits**. Defaults are unlimited
+Use **Settings → Run limits** and click **Apply limits**. Defaults are unlimited
 speed/time/bytes with scheduling off. Settings persist locally and can be changed
 during a run.
 
@@ -345,7 +350,7 @@ python -m venv .venv-build
 ```
 
 The inspected build script creates `dist\Tera\Tera.exe`,
-`dist\Tera-0.1.0-Setup.exe`, a SHA256 file and logs under `build`. It does not
+`dist\Tera-0.2.0-Setup.exe`, a SHA256 file and logs under `build`. It does not
 launch Tera or install anything. Bundled third-party licenses are in
 `_internal\licenses`. The committed Tcl notice comes from the
 [8.6.15 upstream license](https://github.com/tcltk/tcl/blob/core-8-6-15/license.terms).

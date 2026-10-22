@@ -54,7 +54,16 @@ def main(argv=None, *, prefer_environment=True):
                     from smoke_desktop import main as check
                 from windows_runtime import application_mutex
                 with application_mutex():
-                    check(directory)
+                    try:
+                        check(directory)
+                    except Exception as error:
+                        import traceback
+                        print('self_test_failed', flush=True)
+                        for frame, line in traceback.walk_tb(error.__traceback__):
+                            module = frame.f_globals.get('__name__')
+                            if module in {'smoke_terabox_gui', 'smoke_desktop'}:
+                                print(f'{module} line={line}', flush=True)
+                        raise
             record(directory, 'self_test_passed')
             return 0
         executable = project_pythonw() if prefer_environment else None

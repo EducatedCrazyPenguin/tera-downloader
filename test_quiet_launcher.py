@@ -8,6 +8,13 @@ import quiet_launcher
 
 
 class LauncherTests(unittest.TestCase):
+    def test_self_test_failure_records_location_without_exception_values(self):
+        with tempfile.TemporaryDirectory() as folder, patch('smoke_terabox_gui.main', side_effect=RuntimeError('private-url-token')):
+            self.assertEqual(quiet_launcher.main(['--data-dir', folder, '--self-test', 'app']), 1)
+            text = (Path(folder) / 'self-test.log').read_text()
+            self.assertIn('self_test_failed', text)
+            self.assertNotIn('private', text)
+
     def test_launch_uses_isolated_data_and_no_cli_or_browser_action(self):
         with tempfile.TemporaryDirectory() as folder, patch('tera_gui.gui') as gui:
             self.assertEqual(quiet_launcher.main(['--data-dir', folder], prefer_environment=False), 0)

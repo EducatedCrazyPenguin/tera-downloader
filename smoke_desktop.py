@@ -140,7 +140,7 @@ def launcher_check(base):
             if owner.value == pid:
                 title = ctypes.create_unicode_buffer(128)
                 user32.GetWindowTextW(hwnd, title, len(title))
-                if title.value == 'Tera — download queue' and user32.IsWindowVisible(hwnd):
+                if title.value == 'Tera' and user32.IsWindowVisible(hwnd):
                     found.append(hwnd)
             return True
         user32.EnumWindows(inspect, 0)

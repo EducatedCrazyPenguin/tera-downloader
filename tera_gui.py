@@ -82,20 +82,83 @@ class TeraApp:
         self.tray_pending = False
         self.tray_hidden = False
         self.tray_started = 0
-        root.title('Tera — download queue')
+        root.title('Tera')
         root.geometry('1020x760')
         root.minsize(880, 680)
+        paper, ink, muted, red = '#FAF8F4', '#282624', '#625C56', '#A5262D'
         style = ttk.Style(root)
         style.theme_use('clam')
-        style.configure('TButton', padding=6, font=('Segoe UI', 10))
-        style.configure('TLabel', font=('Segoe UI', 10))
-        style.configure('Treeview', rowheight=26, font=('Segoe UI', 10))
-        frame = ttk.Frame(root, padding=18)
+        style.configure('.', background=paper, foreground=ink, font=('Segoe UI', 10))
+        style.configure('TButton', padding=(10, 6))
+        style.configure('Primary.TButton', background=red, foreground='white', font=('Segoe UI', 10, 'bold'))
+        style.map('Primary.TButton', background=[('disabled', '#E5DDD7'), ('pressed', '#711B20'), ('active', '#8B2027')],
+                  foreground=[('disabled', '#6A625C')])
+        style.configure('TEntry', fieldbackground='white', padding=4)
+        style.configure('TNotebook', borderwidth=0)
+        style.configure('TNotebook.Tab', padding=(14, 8))
+        style.map('TNotebook.Tab', background=[('selected', paper)], foreground=[('selected', red)])
+        style.configure('Treeview', rowheight=int(20 * float(root.tk.call('tk', 'scaling'))),
+                        font=('Segoe UI', 11), fieldbackground='white', background='white', borderwidth=0)
+        style.configure('Treeview.Heading', padding=(8, 7), font=('Segoe UI', 10, 'bold'))
+        style.map('Treeview', background=[('selected', '#E9D6D3')], foreground=[('selected', ink)])
+        style.configure('TProgressbar', background=red, troughcolor='#E7E1D9', thickness=6)
+        frame = ttk.Frame(root, padding=(20, 14))
         frame.pack(fill='both', expand=True)
-        ttk.Label(frame, text='Tera', font=('Segoe UI', 24, 'bold')).pack(anchor='w')
-        ttk.Label(frame, text='Direct downloads · Local queue and history · Firefox login stays in Firefox').pack(anchor='w', pady=(2, 10))
-        source_row = ttk.Frame(frame)
+        # Pack fixed controls first so the expanding list yields at small sizes.
+        footer = ttk.Frame(frame)
+        footer.pack(side='bottom', fill='x', pady=(8, 0))
+        header = ttk.Frame(frame)
+        header.pack(fill='x', pady=(0, 10))
+        ttk.Label(header, text='Tera', font=('Georgia', 22)).pack(side='left')
+        self.settings_button = ttk.Button(header, text='Settings', command=lambda: self.notebook.select(self.settings_page))
+        self.settings_button.pack(side='right')
+        ttk.Button(header, text='Add links', command=lambda: self.notebook.select(self.queue_page)).pack(side='right', padx=8)
+        notebook = self.notebook = ttk.Notebook(frame)
+        notebook.pack(fill='both', expand=True)
+        self.queue_page = queue_page = ttk.Frame(notebook, padding=(0, 8))
+        self.review_page = ttk.Frame(notebook, padding=(0, 8))
+        history_page = ttk.Frame(notebook, padding=(0, 8))
+        notebook.add(queue_page, text='Downloads')
+        notebook.add(self.review_page, text='Choose videos')
+        notebook.add(history_page, text='History')
+        self.settings_page = ttk.Frame(notebook, padding=(0, 8))
+        notebook.add(self.settings_page, text='Settings')
+        self.settings_tabs = ttk.Notebook(self.settings_page)
+        self.settings_tabs.pack(fill='both', expand=True)
+        general_page = self._settings_page('General')
+        login_page = self._settings_page('Firefox login')
+        self.limits_page = self._settings_page('Run limits')
+        help_page = self._settings_page('Help / About')
+        ttk.Label(queue_page, text='TeraBox share links').pack(anchor='w')
+        links_row = ttk.Frame(queue_page)
+        links_row.pack(fill='x', pady=(4, 8))
+        links_row.columnconfigure(0, weight=1)
+        self.links_box = tk.Text(links_row, height=2, wrap='word', font=('Segoe UI', 10),
+                                 background='white', foreground=ink, insertbackground=red,
+                                 selectbackground='#E9D6D3', selectforeground=ink, relief='solid', borderwidth=1,
+                                 highlightcolor=red, highlightthickness=1, padx=8, pady=5)
+        self.links_box.grid(row=0, column=0, rowspan=2, sticky='nsew', padx=(0, 10))
+        self.download_button = ttk.Button(links_row, text='Download now', style='Primary.TButton', command=lambda: self.add_links(quick=True))
+        self.download_button.grid(row=0, column=1, sticky='ew')
+        self.add_button = ttk.Button(links_row, text='Choose videos…', command=self.add_links)
+        self.add_button.grid(row=1, column=1, sticky='ew', pady=(4, 0))
+        folder_row = ttk.Frame(queue_page)
+        folder_row.pack(fill='x', pady=(0, 12))
+        ttk.Label(folder_row, text='Save to').pack(side='left', padx=(0, 8))
+        default_downloads = downloads_directory()
+        self.destination = tk.StringVar(value=str(default_downloads) if default_downloads else '')
+        self.destination_entry = ttk.Entry(folder_row, textvariable=self.destination)
+        self.destination_entry.pack(side='left', fill='x', expand=True)
+        self.browse_button = ttk.Button(folder_row, text='Change…', command=self.browse)
+        self.browse_button.pack(side='left', padx=(8, 0))
+        self.file_actions_button = ttk.Menubutton(folder_row, text='File actions')
+        self.file_actions_button.pack(side='left', padx=(8, 0))
+        self.file_actions_menu = tk.Menu(self.file_actions_button, tearoff=False)
+        self.file_actions_button.configure(menu=self.file_actions_menu)
+        ttk.Label(login_page, text='Use your selected Firefox login', font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 12))
+        source_row = ttk.Frame(login_page)
         source_row.pack(fill='x')
+        source_row.columnconfigure(0, weight=1)
         self.source = tk.StringVar(value='No login')
         self.profile_options = {'No login': None}
         try:
@@ -105,34 +168,21 @@ class TeraApp:
         for profile in available:
             self.profile_options[f'Firefox: {profile.name} ({profile.path.name})'] = profile
         self.source_box = ttk.Combobox(source_row, textvariable=self.source, values=list(self.profile_options), state='readonly', width=45)
-        self.source_box.pack(side='left', fill='x', expand=True)
+        self.source_box.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 12))
         self.source_box.bind('<<ComboboxSelected>>', self.source_changed)
         self.login_button = ttk.Button(source_row, text='Login in Firefox', command=self.launch_firefox)
-        self.login_button.pack(side='left', padx=6)
+        self.login_button.grid(row=1, column=0, sticky='w')
         self.check_button = ttk.Button(source_row, text='Check login', command=self.check_login)
-        self.check_button.pack(side='left')
+        self.check_button.grid(row=1, column=1, sticky='w', padx=6)
         self.disconnect_button = ttk.Button(source_row, text='Disconnect', command=self.disconnect)
-        self.disconnect_button.pack(side='left', padx=(6, 0))
+        self.disconnect_button.grid(row=2, column=0, sticky='w', pady=8)
         self.login_status = tk.StringVar(value='Opening saved queue…')
-        ttk.Label(frame, textvariable=self.login_status, wraplength=950).pack(anchor='w', pady=(4, 8))
-        ttk.Label(frame, text='Paste share links, one per line or separated by commas.').pack(anchor='w')
-        self.links_box = tk.Text(frame, height=3, wrap='word', font=('Segoe UI', 10))
-        self.links_box.pack(fill='x', pady=(4, 6))
-        folder_row = ttk.Frame(frame)
-        folder_row.pack(fill='x')
-        default_downloads = downloads_directory()
-        self.destination = tk.StringVar(value=str(default_downloads) if default_downloads else '')
-        self.destination_entry = ttk.Entry(folder_row, textvariable=self.destination)
-        self.destination_entry.pack(side='left', fill='x', expand=True)
-        self.browse_button = ttk.Button(folder_row, text='Save to…', command=self.browse)
-        self.browse_button.pack(side='left', padx=6)
-        self.add_button = ttk.Button(folder_row, text='Review links', command=self.add_links)
-        self.add_button.pack(side='left')
+        ttk.Label(login_page, textvariable=self.login_status, wraplength=600).pack(anchor='w', pady=(4, 8))
         self.per_share = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frame, text='Use a separate folder for each share', variable=self.per_share).pack(anchor='w')
-        favorite_row = ttk.Frame(frame)
+        ttk.Checkbutton(general_page, text='Use a separate folder for each share', variable=self.per_share).pack(anchor='w')
+        favorite_row = ttk.Frame(general_page)
         favorite_row.pack(fill='x', pady=(5, 9))
-        ttk.Label(favorite_row, text='Favorite folders').pack(side='left')
+        ttk.Label(general_page, text='Favorite folders').pack(anchor='w', pady=(16, 4))
         self.favorite = tk.StringVar()
         self.favorite_box = ttk.Combobox(favorite_row, textvariable=self.favorite, state='readonly', width=30)
         self.favorite_box.pack(side='left', padx=6)
@@ -140,26 +190,17 @@ class TeraApp:
         self.favorite_button = ttk.Button(favorite_row, text='Save favorite…', command=self.save_favorite)
         self.favorite_button.pack(side='left')
         self.forget_favorite_button = ttk.Button(favorite_row, text='Remove favorite', command=self.remove_favorite)
-        self.forget_favorite_button.pack(side='left', padx=6)
-        desktop_row = ttk.Frame(frame)
+        self.forget_favorite_button.pack(anchor='w', pady=6)
+        desktop_row = ttk.Frame(general_page)
         desktop_row.pack(fill='x', pady=(0, 6))
         self.tray_button = ttk.Button(desktop_row, text='Minimize to tray', command=self.minimize_to_tray)
-        self.tray_button.pack(side='left')
+        self.tray_button.pack(anchor='w', pady=(12, 0))
         self.notify_enabled = tk.BooleanVar(value=False)
         self.notify_check = ttk.Checkbutton(desktop_row, text='Notify on completion or action needed', variable=self.notify_enabled,
                                            command=self.change_notifications)
-        self.notify_check.pack(side='left', padx=8)
+        self.notify_check.pack(anchor='w', pady=10)
         self.desktop_status = tk.StringVar(value='X saves and exits.' if self.desktop_supported else 'Tray unavailable — optional desktop packages needed.')
-        ttk.Label(desktop_row, textvariable=self.desktop_status).pack(side='left')
-        notebook = self.notebook = ttk.Notebook(frame)
-        notebook.pack(fill='both', expand=True)
-        self.review_page = ttk.Frame(notebook)
-        notebook.add(self.review_page, text='Review')
-        queue_page, history_page = ttk.Frame(notebook), ttk.Frame(notebook)
-        notebook.add(queue_page, text='Queue')
-        notebook.add(history_page, text='History')
-        self.limits_page = ttk.Frame(notebook, padding=10)
-        notebook.add(self.limits_page, text='Run limits')
+        ttk.Label(desktop_row, textvariable=self.desktop_status, wraplength=600).pack(anchor='w')
         self.timezone_text = tk.StringVar(value='Windows local time')
         ttk.Label(self.limits_page, textvariable=self.timezone_text).grid(row=0, column=0, columnspan=4, sticky='w', pady=(0, 8))
         self.limit_speed = tk.StringVar(value='0')
@@ -197,9 +238,9 @@ class TeraApp:
         ttk.Label(self.review_page, textvariable=self.review_summary, wraplength=930).pack(anchor='w', pady=4)
         review_actions = ttk.Frame(self.review_page)
         review_actions.pack(fill='x')
-        self.download_button = ttk.Button(review_actions, text='Download selected', command=self.download_selected)
-        self.download_button.pack(side='left')
-        self.review_saved_button = ttk.Button(review_actions, text='Review saved shares', command=lambda: self.send('review_saved'))
+        self.selected_button = ttk.Button(review_actions, text='Download selected', style='Primary.TButton', command=self.download_selected)
+        self.selected_button.pack(side='left', padx=(0, 6))
+        self.review_saved_button = ttk.Button(review_actions, text='Review saved', command=lambda: self.send('review_saved'))
         self.review_saved_button.pack(side='left', padx=6)
         ttk.Button(review_actions, text='Change folder…', command=lambda: self.change_destination(self.review_tree)).pack(side='left')
         ttk.Button(review_actions, text='Rename…', command=lambda: self.rename_selected(self.review_tree)).pack(side='left', padx=6)
@@ -207,7 +248,6 @@ class TeraApp:
         self.queue_tree = self._tree(queue_page, ('name', 'status', 'size', 'progress', 'source', 'folder'),
                                      ('Video / share', 'Status', 'Size', 'Progress', 'Login source', 'Destination'))
         edit = ttk.Frame(queue_page)
-        edit.pack(fill='x', pady=5)
         self.up_button = ttk.Button(edit, text='Move up', command=lambda: self.move(-1))
         self.down_button = ttk.Button(edit, text='Move down', command=lambda: self.move(1))
         self.remove_button = ttk.Button(edit, text='Remove pending', command=self.remove_pending)
@@ -215,9 +255,10 @@ class TeraApp:
             button.pack(side='left', padx=(0, 6))
         ttk.Button(edit, text='Change folder…', command=lambda: self.change_destination(self.queue_tree)).pack(side='left')
         ttk.Button(edit, text='Rename…', command=lambda: self.rename_selected(self.queue_tree)).pack(side='left', padx=6)
-        self.restart_button = ttk.Button(edit, text='Restart from zero', command=self.restart_selected)
+        recovery_actions = ttk.Frame(queue_page)
+        self.restart_button = ttk.Button(recovery_actions, text='Restart from zero', command=self.restart_selected)
         self.restart_button.pack(side='left')
-        self.retry_queue_button = ttk.Button(edit, text='Retry selected', command=lambda: self.send('retry', job_ids=list(self.queue_tree.selection())))
+        self.retry_queue_button = ttk.Button(recovery_actions, text='Retry selected', command=lambda: self.send('retry', job_ids=list(self.queue_tree.selection())))
         self.retry_queue_button.pack(side='left', padx=6)
         self.history_filter = tk.StringVar(value='All')
         filter_row = ttk.Frame(history_page)
@@ -231,17 +272,24 @@ class TeraApp:
         self.reveal_button.pack(side='left')
         self.clear_button = ttk.Button(filter_row, text='Clear history', command=lambda: self.send('clear_history'))
         self.clear_button.pack(side='left', padx=6)
-        self.restart_history_button = ttk.Button(filter_row, text='Restart from zero', command=lambda: self.restart_selected(self.history_tree))
-        self.restart_history_button.pack(side='left')
+        history_recovery = ttk.Frame(history_page)
+        history_recovery.pack(fill='x')
+        self.restart_history_button = ttk.Button(history_recovery, text='Restart from zero', command=lambda: self.restart_selected(self.history_tree))
+        self.restart_history_button.pack(side='left', pady=4)
         self.history_search, self.history_sort = self.search_controls(history_page, 'History', list(SORTS)[:3] + list(SORTS)[5:])
         self.history_tree = self._tree(history_page, ('name', 'status', 'finished', 'detail'),
                                        ('Video / share', 'Status', 'Finished', 'Detail'))
-        help_page = ttk.Frame(notebook, padding=12)
-        notebook.add(help_page, text='Help / About')
+        for tree in (self.review_tree, self.queue_tree, self.history_tree):
+            tree.master.pack_forget()
+            tree.master.pack(fill='both', expand=True)
+        self.empty_queue = ttk.Label(queue_page, text='Your downloads will appear here. Paste a share link above, then Download now.', wraplength=700, foreground=muted)
+        self.empty_queue.pack(anchor='w', pady=8)
+        self.queue_tree.master.pack_forget()
+        self.queue_tree.master.pack(fill='both', expand=True)
         ttk.Label(help_page, text=f'Tera {VERSION}', font=('Segoe UI', 16, 'bold')).pack(anchor='w')
         ttk.Label(help_page, text=(
             'Select your Firefox profile, sign into TeraBox there, then use Check login.\n'
-            'Review links and choose videos before downloading.\n\n'
+            'Paste share links and Download now, or Choose videos to select files.\n\n'
             'Checking saved download verifies your existing bytes before continuing.\n'
             'Login required: refresh the saved Firefox login, then Retry selected.\n'
             'Storage needs attention: check the destination, free space and conflicting files.\n'
@@ -257,25 +305,69 @@ class TeraApp:
         self.queue_tree.bind('<<TreeviewSelect>>', lambda event: self.configure_controls())
         self.history_tree.bind('<<TreeviewSelect>>', lambda event: self.configure_controls())
         self.status = tk.StringVar(value='Opening saved queue…')
-        ttk.Label(frame, textvariable=self.status, wraplength=950).pack(anchor='w', pady=(8, 4))
-        self.progress = ttk.Progressbar(frame, maximum=100)
-        self.progress.pack(fill='x')
         self.dashboard = tk.StringVar(value='No transfer running')
-        ttk.Label(frame, textvariable=self.dashboard, wraplength=950).pack(anchor='w', pady=5)
-        actions = ttk.Frame(frame)
+        summary_row = ttk.Frame(footer)
+        summary_row.pack(fill='x', pady=(4, 6))
+        for column in (0, 1):
+            summary_row.columnconfigure(column, weight=1, uniform='summary')
+        status_label = ttk.Label(summary_row, textvariable=self.status, wraplength=400)
+        status_label.grid(row=0, column=0, sticky='w', padx=(0, 8))
+        speed_label = ttk.Label(summary_row, textvariable=self.dashboard, wraplength=400, justify='right')
+        speed_label.grid(row=0, column=1, sticky='e')
+        def wrap_summary(event):
+            for label in (status_label, speed_label):
+                label.configure(wraplength=max(200, event.width // 2 - 12))
+        summary_row.bind('<Configure>', wrap_summary)
+        self.progress = ttk.Progressbar(footer, maximum=100)
+        self.progress.pack(fill='x', pady=(0, 6))
+        actions = ttk.Frame(footer)
         actions.pack(fill='x')
         self.start_button = ttk.Button(actions, text='Start queue', command=lambda: self.send('start'))
         self.pause_button = ttk.Button(actions, text='Pause now', command=self.pause_now)
-        self.boundary_button = ttk.Button(actions, text='Finish current, then pause', command=lambda: self.send('pause_after'))
-        self.skip_button = ttk.Button(actions, text='Skip', command=self.skip_selected)
+        self.boundary_button = ttk.Button(recovery_actions, text='Pause after file', command=lambda: self.send('pause_after'))
+        self.skip_button = ttk.Button(recovery_actions, text='Skip', command=self.skip_selected)
         self.cancel_button = ttk.Button(actions, text='Cancel queue', command=lambda: self.send('cancel'))
-        self.new_run_button = ttk.Button(actions, text='Start new run', command=lambda: self.send('start', new_run=True))
-        for button in (self.start_button, self.pause_button, self.boundary_button, self.skip_button, self.cancel_button, self.new_run_button):
-            button.pack(side='left', padx=(0, 6))
-        ttk.Label(frame, text='Closing saves verified partial bytes. Continuation requires server validation; live TeraBox resume is unverified.', foreground='#555555', wraplength=950).pack(anchor='w', pady=(8, 0))
+        self.new_run_button = ttk.Button(self.limits_page, text='Start new run', command=lambda: self.send('start', new_run=True))
+        for button in (self.start_button, self.pause_button, self.cancel_button):
+            button.pack(side='left', padx=(0, 8))
+        self.boundary_button.pack(side='left', padx=6)
+        self.skip_button.pack(side='left')
+        self.new_run_button.grid(row=6, column=0, sticky='w', pady=10)
+        # Reuse each command's existing state check from the native menu.
+        self.file_menu_entries = []
+        for button in (self.up_button, self.down_button, self.remove_button, self.restart_button,
+                       self.retry_queue_button, self.skip_button, self.boundary_button):
+            self.file_actions_menu.add_command(label=button['text'], command=button.invoke)
+            self.file_menu_entries.append(button)
+        self.file_actions_menu.add_separator()
+        self.file_actions_menu.add_command(label='Change folder…', command=lambda: self.change_destination(self.queue_tree))
+        self.file_actions_menu.add_command(label='Rename…', command=lambda: self.rename_selected(self.queue_tree))
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.configure_controls()
         self.poll_id = root.after(50, self.poll)
+
+    def _settings_page(self, title):
+        page = ttk.Frame(self.settings_tabs)
+        self.settings_tabs.add(page, text=title)
+        canvas = tk.Canvas(page, background='#FAF8F4', highlightthickness=0, takefocus=True)
+        vertical = ttk.Scrollbar(page, orient='vertical', command=canvas.yview)
+        horizontal = ttk.Scrollbar(page, orient='horizontal', command=canvas.xview)
+        canvas.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        horizontal.pack(side='bottom', fill='x')
+        vertical.pack(side='right', fill='y')
+        canvas.pack(fill='both', expand=True)
+        body = ttk.Frame(canvas, padding=12)
+        window = canvas.create_window(0, 0, window=body, anchor='nw')
+        def resize(event=None):
+            canvas.itemconfigure(window, width=max(canvas.winfo_width(), body.winfo_reqwidth()))
+            canvas.configure(scrollregion=canvas.bbox('all'))
+        canvas.bind('<Configure>', resize)
+        body.bind('<Configure>', resize)
+        canvas.bind('<Next>', lambda event: canvas.yview_scroll(1, 'pages'))
+        canvas.bind('<Prior>', lambda event: canvas.yview_scroll(-1, 'pages'))
+        self.root.bind('<MouseWheel>', lambda event: canvas.yview_scroll(-int(event.delta / 120), 'units')
+                       if str(event.widget).startswith(str(body)) else None, add='+')
+        return body
 
     def _tree(self, parent, columns, headings):
         area = ttk.Frame(parent)
@@ -284,6 +376,9 @@ class TeraApp:
         for column, heading in zip(columns, headings):
             tree.heading(column, text=heading)
             tree.column(column, width=110 if column not in ('name', 'detail', 'folder') else 210, minwidth=65)
+        tree.column('name', width=320, minwidth=200)
+        if 'status' in columns:
+            tree.column('status', width=190, minwidth=150)
         vertical = ttk.Scrollbar(area, orient='vertical', command=tree.yview)
         horizontal = ttk.Scrollbar(area, orient='horizontal', command=tree.xview)
         tree.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
@@ -429,7 +524,7 @@ class TeraApp:
             self.destination.set(chosen)
             self.send('preferences', changes={'last_destination': chosen})
 
-    def add_links(self):
+    def add_links(self, quick=False):
         if self.pending_add is not None or not self.initialized or self.closing:
             return
         try:
@@ -437,9 +532,9 @@ class TeraApp:
             links = parse_links(text)
             if not self.destination.get().strip():
                 raise DownloadError('Choose a destination folder first.')
-            self.send('review', links=links, folder=self.destination.get().strip(), profile=self.profile_options.get(self.source.get()), per_share=self.per_share.get())
+            self.send('download_now' if quick else 'review', links=links, folder=self.destination.get().strip(), profile=self.profile_options.get(self.source.get()), per_share=self.per_share.get())
             self.pending_add = text
-            self.notebook.select(self.review_page)
+            self.notebook.select(self.queue_page if quick else self.review_page)
             self.configure_controls()
         except DownloadError as error:
             self.status.set(str(error).split('\n')[0])
@@ -486,6 +581,7 @@ class TeraApp:
     def download_selected(self):
         if self.snapshot:
             self.send('select', job_ids=[j['id'] for j in self.snapshot['jobs'] if j['status'] == 'review'])
+            self.notebook.select(self.queue_page)
 
     def change_destination(self, tree):
         identifiers = list(tree.selection())
@@ -601,7 +697,8 @@ class TeraApp:
             enabled(widget, available)
         enabled(self.skip_button, available and (bool(snapshot.get('active')) or any(j['status'] in HOLDS | {'retry_wait'} for j in snapshot.get('jobs', []))))
         enabled(self.cancel_button, available and bool(working or discovering))
-        enabled(self.download_button, available and not self.login_busy and any(j['status'] == 'review' for j in snapshot.get('jobs', [])))
+        enabled(self.download_button, available and not self.login_busy and self.pending_add is None)
+        enabled(self.selected_button, available and not self.login_busy and any(j['status'] == 'review' for j in snapshot.get('jobs', [])))
         enabled(self.review_saved_button, available and not discovering and any(j['status'] == 'unreviewed' for j in snapshot.get('jobs', [])))
         jobs = {j['id']: j for j in snapshot.get('jobs', [])}
         selected = jobs.get(self.selected_queue_job(), {})
@@ -615,6 +712,10 @@ class TeraApp:
         enabled(self.restart_history_button, available and any(j['status'] == 'failed' and not j['source_blocked'] for j in history_selection))
         enabled(self.reveal_button, available and any(j['status'] == 'completed' for j in history_selection))
         enabled(self.clear_button, available and not working and any(j['status'] in TERMINAL for j in jobs.values()))
+        for index, button in enumerate(self.file_menu_entries):
+            self.file_actions_menu.entryconfigure(index, state='disabled' if button.instate(['disabled']) else 'normal')
+        for index in (8, 9):
+            self.file_actions_menu.entryconfigure(index, state='normal' if available and selected.get('status') in {'pending', 'attention'} else 'disabled')
 
     def render(self):
         if not self.snapshot:
@@ -626,6 +727,10 @@ class TeraApp:
         reviewed = visible_jobs([j for j in jobs if j['status'] in REVIEW], self.review_search.get(), *SORTS[self.review_sort.get()])
         historical = visible_jobs([j for j in jobs if j['status'] in TERMINAL], self.history_search.get(), *SORTS[self.history_sort.get()])
         queued = [j for j in jobs if j['status'] not in REVIEW | TERMINAL]
+        if queued:
+            self.empty_queue.pack_forget()
+        elif not self.empty_queue.winfo_manager():
+            self.empty_queue.pack(before=self.queue_tree.master, anchor='w', pady=8)
         for job in reviewed + queued + historical:
             video = job['video']
             name = job['output_name'] or (video['name'] if video else 'Share awaiting discovery')

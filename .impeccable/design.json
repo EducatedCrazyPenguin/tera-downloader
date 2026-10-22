@@ -1,0 +1,299 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-22T07:43:25.506Z",
+  "title": "Design System: Tera",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Programme red",
+        "tonalRamp": [
+          "oklch(15% 0.16 23)",
+          "oklch(27% 0.16 23)",
+          "oklch(39% 0.16 23)",
+          "oklch(51% 0.16 23)",
+          "oklch(63% 0.16 23)",
+          "oklch(75% 0.16 23)",
+          "oklch(87% 0.16 23)",
+          "oklch(95% 0.16 23)"
+        ]
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Deep active red",
+        "tonalRamp": [
+          "oklch(15% 0.14 22)",
+          "oklch(27% 0.14 22)",
+          "oklch(39% 0.14 22)",
+          "oklch(51% 0.14 22)",
+          "oklch(63% 0.14 22)",
+          "oklch(75% 0.14 22)",
+          "oklch(87% 0.14 22)",
+          "oklch(95% 0.14 22)"
+        ]
+      },
+      "primary-pressed": {
+        "role": "primary",
+        "displayName": "Deep pressed red",
+        "tonalRamp": [
+          "oklch(15% 0.11 22)",
+          "oklch(27% 0.11 22)",
+          "oklch(39% 0.11 22)",
+          "oklch(51% 0.11 22)",
+          "oklch(63% 0.11 22)",
+          "oklch(75% 0.11 22)",
+          "oklch(87% 0.11 22)",
+          "oklch(95% 0.11 22)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Warm paper",
+        "tonalRamp": [
+          "oklch(15% 0.006 80)",
+          "oklch(27% 0.006 80)",
+          "oklch(39% 0.006 80)",
+          "oklch(51% 0.006 80)",
+          "oklch(63% 0.006 80)",
+          "oklch(75% 0.006 80)",
+          "oklch(87% 0.006 80)",
+          "oklch(95% 0.006 80)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Charcoal",
+        "tonalRamp": [
+          "oklch(15% 0.006 65)",
+          "oklch(27% 0.006 65)",
+          "oklch(39% 0.006 65)",
+          "oklch(51% 0.006 65)",
+          "oklch(63% 0.006 65)",
+          "oklch(75% 0.006 65)",
+          "oklch(87% 0.006 65)",
+          "oklch(95% 0.006 65)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Warm grey",
+        "tonalRamp": [
+          "oklch(15% 0.012 65)",
+          "oklch(27% 0.012 65)",
+          "oklch(39% 0.012 65)",
+          "oklch(51% 0.012 65)",
+          "oklch(63% 0.012 65)",
+          "oklch(75% 0.012 65)",
+          "oklch(87% 0.012 65)",
+          "oklch(95% 0.012 65)"
+        ]
+      },
+      "field": {
+        "role": "neutral",
+        "displayName": "White work area",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(27% 0 0)",
+          "oklch(39% 0 0)",
+          "oklch(51% 0 0)",
+          "oklch(63% 0 0)",
+          "oklch(75% 0 0)",
+          "oklch(87% 0 0)",
+          "oklch(95% 0 0)"
+        ]
+      },
+      "selection": {
+        "role": "neutral",
+        "displayName": "Blush selection",
+        "tonalRamp": [
+          "oklch(15% 0.025 28)",
+          "oklch(27% 0.025 28)",
+          "oklch(39% 0.025 28)",
+          "oklch(51% 0.025 28)",
+          "oklch(63% 0.025 28)",
+          "oklch(75% 0.025 28)",
+          "oklch(87% 0.025 28)",
+          "oklch(95% 0.025 28)"
+        ]
+      },
+      "disabled-background": {
+        "role": "neutral",
+        "displayName": "Quiet disabled background",
+        "tonalRamp": [
+          "oklch(15% 0.014 60)",
+          "oklch(27% 0.014 60)",
+          "oklch(39% 0.014 60)",
+          "oklch(51% 0.014 60)",
+          "oklch(63% 0.014 60)",
+          "oklch(75% 0.014 60)",
+          "oklch(87% 0.014 60)",
+          "oklch(95% 0.014 60)"
+        ]
+      },
+      "disabled-text": {
+        "role": "neutral",
+        "displayName": "Quiet disabled text",
+        "tonalRamp": [
+          "oklch(15% 0.014 60)",
+          "oklch(27% 0.014 60)",
+          "oklch(39% 0.014 60)",
+          "oklch(51% 0.014 60)",
+          "oklch(63% 0.014 60)",
+          "oklch(75% 0.014 60)",
+          "oklch(87% 0.014 60)",
+          "oklch(95% 0.014 60)"
+        ]
+      },
+      "progress-trough": {
+        "role": "neutral",
+        "displayName": "Stone trough",
+        "tonalRamp": [
+          "oklch(15% 0.014 75)",
+          "oklch(27% 0.014 75)",
+          "oklch(39% 0.014 75)",
+          "oklch(51% 0.014 75)",
+          "oklch(63% 0.014 75)",
+          "oklch(75% 0.014 75)",
+          "oklch(87% 0.014 75)",
+          "oklch(95% 0.014 75)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Editorial title",
+        "purpose": "Georgia title; Tk point size, not CSS pixels."
+      },
+      "headline": {
+        "displayName": "Help heading",
+        "purpose": "Bold Help / About version heading."
+      },
+      "title": {
+        "displayName": "Login heading",
+        "purpose": "Bold Firefox-login heading."
+      },
+      "filename": {
+        "displayName": "Filename",
+        "purpose": "Shared Treeview rows, larger than body controls."
+      },
+      "body": {
+        "displayName": "Working text",
+        "purpose": "Native labels, controls and link entry."
+      },
+      "label": {
+        "displayName": "Strong label",
+        "purpose": "Primary buttons and table headings."
+      }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [],
+    "nativeLayout": {
+      "platform": "Windows / Python Tkinter",
+      "theme": "clam",
+      "initialClientArea": "1020x760",
+      "minimumClientArea": "880x680",
+      "rowHeight": "int(20 * tk_scaling) pixels at construction",
+      "fontUnits": "Tk positive point sizes",
+      "paddingAndColumnUnits": "Tk pixels",
+      "verification": "Source and supplied native captures reviewed; application/tests/installed build not independently rerun by the documenter.",
+      "capturePaths": [
+        ".impeccable/review/windows-desktop.png",
+        ".impeccable/review/windows-small-large-text.png"
+      ],
+      "previewStatus": "The HTML/CSS below is a self-contained illustrative translation for the design panel. It is not application code, a pixel-exact native control renderer, or evidence of a web variant.",
+      "rampStatus": "All tonal ramps are synthesized OKLCH panel aids. They are not shipped application tokens; the DESIGN.md frontmatter remains normative.",
+      "evidence": "3/3 — precise recorded tokens and visible layout checked against source and supplied captures; no independent runtime, provider or installation verification.",
+      "iconProvenance": "Existing authored geometric white T, drawn with rectangles on the shared programme-red background in desktop_integration.py and build_windows.py; no AI-generated raster assets."
+    }
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Native Download now / Download selected action; illustrative panel translation.",
+      "html": "<button class=\"ds-primary\">Download now</button>",
+      "css": ".ds-primary{background:#A5262D;color:#FFFFFF;padding:6px 10px;border:1px solid #8B2027;border-radius:0;font:700 10pt \"Segoe UI\",sans-serif}.ds-primary:hover{background:#8B2027}.ds-primary:active{background:#711B20}.ds-primary:focus-visible{outline:1px dotted #282624;outline-offset:2px}.ds-primary:disabled{background:#E5DDD7;color:#6A625C}"
+    },
+    {
+      "name": "Secondary action",
+      "kind": "button",
+      "description": "Shared padded square ttk action; native theme border and focus are approximated for the panel.",
+      "html": "<button class=\"ds-secondary\">Change…</button>",
+      "css": ".ds-secondary{background:#FAF8F4;color:#282624;padding:6px 10px;border:1px solid #625C56;border-radius:0;font:400 10pt \"Segoe UI\",sans-serif}.ds-secondary:hover{border-color:#282624}.ds-secondary:active{border-style:inset}.ds-secondary:focus-visible{outline:1px dotted #282624;outline-offset:2px}"
+    },
+    {
+      "name": "Share links",
+      "kind": "input",
+      "refersTo": "link-field",
+      "description": "Two-line share-link Text widget; red caret/focus and blush selection.",
+      "html": "<label class=\"ds-link-label\" for=\"ds-links\">TeraBox share links</label><textarea id=\"ds-links\" class=\"ds-links\" rows=\"2\"></textarea>",
+      "css": ".ds-link-label{display:block;color:#282624;font:400 10pt \"Segoe UI\",sans-serif;margin-bottom:4px}.ds-links{background:#FFFFFF;color:#282624;caret-color:#A5262D;border:1px solid #282624;border-radius:0;padding:5px 8px;font:400 10pt \"Segoe UI\",sans-serif;width:90%;resize:vertical}.ds-links::selection{background:#E9D6D3;color:#282624}.ds-links:hover{border-color:#625C56}.ds-links:focus-visible{outline:1px solid #A5262D}"
+    },
+    {
+      "name": "Notebook navigation",
+      "kind": "nav",
+      "refersTo": "tab-selected",
+      "description": "Main native notebook; tab interactions shown as a panel illustration.",
+      "html": "<nav class=\"ds-tabs\" aria-label=\"Tera pages\"><button aria-current=\"page\">Downloads</button><button>Choose videos</button><button>History</button><button>Settings</button></nav>",
+      "css": ".ds-tabs{display:flex;flex-wrap:wrap;background:#FAF8F4}.ds-tabs button{padding:8px 14px;border:1px solid #625C56;border-radius:0;background:#FAF8F4;color:#282624;font:400 10pt \"Segoe UI\",sans-serif}.ds-tabs button[aria-current]{color:#A5262D}.ds-tabs button:hover{border-color:#282624}.ds-tabs button:active{border-style:inset}.ds-tabs button:focus-visible{outline:1px dotted #282624;outline-offset:-4px}"
+    },
+    {
+      "name": "Filename table",
+      "kind": "custom",
+      "refersTo": "filename-row",
+      "description": "White Treeview with generous filenames; synthetic panel sample, not captured application data.",
+      "html": "<div class=\"ds-table-scroll\"><table class=\"ds-files\"><thead><tr><th>Video / share</th><th>Status</th><th>Size</th></tr></thead><tbody><tr tabindex=\"0\" aria-selected=\"true\"><td>Sample video.mp4</td><td>Paused</td><td>2.0 MB</td></tr><tr tabindex=\"0\"><td>Next video.mp4</td><td>Pending</td><td>2.0 MB</td></tr></tbody></table></div>",
+      "css": ".ds-table-scroll{overflow:auto;background:#FFFFFF;border:1px solid #625C56}.ds-files{width:100%;border-collapse:collapse;color:#282624;font:400 11pt \"Segoe UI\",sans-serif}.ds-files th{padding:7px 8px;background:#FAF8F4;text-align:left;border:1px solid #625C56;font:700 10pt \"Segoe UI\",sans-serif}.ds-files td{padding:6px 8px;white-space:nowrap}.ds-files tr[aria-selected=\"true\"]{background:#E9D6D3}.ds-files tbody tr:focus-visible{outline:1px dotted #282624;outline-offset:-2px}"
+    },
+    {
+      "name": "Transfer strip",
+      "kind": "custom",
+      "description": "Status, numerical progress and persistent queue actions; illustrative static paused state.",
+      "html": "<section class=\"ds-transfer\"><div class=\"ds-summary\"><span>Paused. Click Resume to continue.</span><span>1.5 MB / 6.0 MB · 0.0 B/s · ETA —</span></div><progress value=\"25\" max=\"100\" aria-label=\"Download progress\"></progress><div class=\"ds-transfer-actions\"><button>Resume</button><button disabled>Pause now</button><button>Cancel queue</button></div></section>",
+      "css": ".ds-transfer{background:#FAF8F4;color:#282624;font:400 10pt \"Segoe UI\",sans-serif}.ds-summary{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:4px 0 6px}.ds-transfer progress{display:block;width:100%;height:6px;accent-color:#A5262D;background:#E7E1D9;margin-bottom:6px}.ds-transfer-actions{display:flex;gap:8px;flex-wrap:wrap}.ds-transfer-actions button{padding:6px 10px;border:1px solid #625C56;border-radius:0;background:#FAF8F4;color:#282624;font:400 10pt \"Segoe UI\",sans-serif}.ds-transfer-actions button:hover:enabled{border-color:#282624}.ds-transfer-actions button:active:enabled{border-style:inset}.ds-transfer-actions button:focus-visible{outline:1px dotted #282624;outline-offset:2px}.ds-transfer-actions button:disabled{color:#6A625C;background:#E5DDD7}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Cinema programme",
+    "overview": "Warm paper, charcoal filenames and restrained red actions give this Windows utility the calm of a printed cinema programme. Georgia gives the Tera name a small editorial signature; Segoe UI and native controls keep the working interface familiar. Filenames receive more emphasis than occasional configuration.\n\nThis records the built Python/Tkinter interface and its `clam` ttk theme. It is a desktop system: native menus, tabs, scrollbars, file dialogs and keyboard behavior remain part of its form language. No web layout, mobile variant or generated photographic asset is implied.",
+    "keyCharacteristics": [
+      "Warm paper surrounding white work areas.",
+      "One restrained red accent for primary actions, selection cues and progress.",
+      "An editorial title above legible filename tables.",
+      "Square native controls and flat, bordered surfaces.",
+      "Expanding content with persistent transfer controls."
+    ],
+    "rules": [
+      {
+        "name": "The Restrained Accent Rule",
+        "body": "Use programme red for established action and state roles; keep the surrounding workspace neutral.",
+        "section": "colors"
+      },
+      {
+        "name": "The Filename First Rule",
+        "body": "Preserve the larger filename face and readable row rhythm; do not gain density by shrinking filenames below surrounding controls.",
+        "section": "typography"
+      },
+      {
+        "name": "The Persistent Controls Rule",
+        "body": "Keep status, progress, Start queue/Resume, Pause now and Cancel queue below the expanding notebook. Extra file maintenance belongs in the existing File actions menu rather than another permanent queue toolbar.",
+        "section": "layout"
+      }
+    ],
+    "dos": [
+      "**Do** use warm paper around white work areas and reserve programme red for established action and state roles.",
+      "**Do** preserve larger filenames, visible table headings and horizontal access to overflow columns.",
+      "**Do** keep transfer status and the essential queue controls outside the shrinking content area.",
+      "**Do** reuse native menus, notebook tabs, scrollbars and keyboard behavior.",
+      "**Do** check the minimum window with enlarged text when changing permanent controls or row density."
+    ],
+    "donts": [
+      "**Don't** turn occasional maintenance into another permanent queue toolbar.",
+      "**Don't** replace readable action labels with decorative glyph-only controls.",
+      "**Don't** add gradients, shadows, pills or animated transitions as if they belonged to the built system.",
+      "**Don't** treat the sidecar's HTML/CSS preview translations or synthesized tonal ramps as shipped native widgets or new application tokens."
+    ]
+  }
+}

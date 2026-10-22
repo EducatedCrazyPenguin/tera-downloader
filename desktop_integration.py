@@ -25,7 +25,7 @@ def make_icon(dispatch):
             if not accepted and (code == win32.NIM_ADD or code == win32.NIM_MODIFY and self.visible):
                 raise OSError('Tray operation unavailable.')
 
-    image = Image.new('RGB', (64, 64), '#175c67')
+    image = Image.new('RGB', (64, 64), '#A5262D')
     draw = ImageDraw.Draw(image)
     draw.rectangle((12, 12, 51, 23), fill='white')
     draw.rectangle((26, 20, 37, 52), fill='white')

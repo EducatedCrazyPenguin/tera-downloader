@@ -7,6 +7,23 @@ from tera_gui import TeraApp, duration_text, size_text, visible_jobs, transfer_m
 
 
 class EntryTests(unittest.TestCase):
+    def test_quick_start_uses_same_validated_input_and_keeps_text_until_saved(self):
+        view = Mock()
+        view.pending_add = None
+        view.initialized = True
+        view.closing = False
+        view.links_box.get.return_value = 'https://terabox.com/s/1synthetic'
+        view.destination.get.return_value = 'synthetic-folder'
+        view.source.get.return_value = 'No login'
+        view.profile_options = {'No login': None}
+        view.per_share.get.return_value = True
+        TeraApp.add_links(view, quick=True)
+        self.assertEqual(view.send.call_args.args, ('download_now',))
+        self.assertTrue(view.send.call_args.kwargs['per_share'])
+        view.notebook.select.assert_called_once_with(view.queue_page)
+        view.links_box.delete.assert_not_called()
+        self.assertEqual(view.pending_add, view.links_box.get.return_value)
+
     def test_filename_filter_and_numeric_sort_leave_source_order_unchanged(self):
         jobs = [{'id': 'b', 'video': {'name': 'B.MP4', 'size': 20}, 'finished': 20},
                 {'id': 'a', 'video': {'name': 'a.mp4', 'size': 100}, 'finished': 10}]

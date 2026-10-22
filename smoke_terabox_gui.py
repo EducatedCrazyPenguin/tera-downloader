@@ -1,4 +1,4 @@
-"""Opt-in native check: withdrawn task-owned Tk roots, synthetic streams only.
+"""Opt-in native check: brief mapped layout checks, then withdrawn synthetic flows.
 
 No profiles/settings from the user, shell opens, network, or child processes.
 """
@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import terabox
 from app_state import StateError
+from app_version import VERSION
 from firefox_session import FirefoxProfile
 from queue_manager import QueueManager
 from tera_gui import TeraApp
@@ -139,8 +140,9 @@ def check_run_limits(base):
             app.destination.set(str(base / 'videos'))
             app.links_box.insert('1.0', LINK)
             app.add_button.invoke()
-            wait(lambda: app.pending_add is None and not app.snapshot['review_busy'], 'review')
-            app.download_button.invoke()
+            wait(lambda: app.pending_add is None and not app.snapshot['review_busy']
+                 and len(app.snapshot['jobs']) == 3 and all(j['video'] for j in app.snapshot['jobs']), 'review')
+            app.selected_button.invoke()
             wait(lambda: app.snapshot['policy_hold'] == 'schedule' and app.snapshot['running'], 'armed schedule')
             assert calls == [] and app.start_button.instate(['disabled'])
             assert not app.pause_button.instate(['disabled'])
@@ -214,13 +216,99 @@ def check_run_limits(base):
                 except tk.TclError: pass
 
 
-def main(workspace=None):
-    print(f'Smoke PID {os.getpid()}; native Tk {tk.TkVersion}; withdrawn windows; synthetic data only', flush=True)
+def check_layout(base, capture_dir=None):
+    """Mapped windows catch clipping that invoking withdrawn widgets cannot detect."""
+    checked = 0
+    for scale in (4 / 3, 2):
+        root = tk.Tk()
+        root.withdraw()
+        root.tk.call('tk', 'scaling', scale)
+        manager = QueueManager(base / str(scale), SyntheticClient)
+        app = TeraApp(root, manager, SyntheticClient, available_profiles=[])
+        errors = []
+        root.report_callback_exception = lambda kind, error, trace: errors.append(error)
+        def wait(predicate):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                root.update()
+                assert not errors, errors
+                if predicate():
+                    return
+                time.sleep(.01)
+            raise AssertionError('Mapped quick-start flow timed out: ' + app.status.get())
+        try:
+            root.deiconify()
+            wait(lambda: app.initialized)
+            app.destination.set(str(base / str(scale) / 'videos'))
+            app.links_box.insert('1.0', LINK)
+            app.download_button.invoke()
+            wait(lambda: app.snapshot['received'] > 0)
+            assert app.notebook.select() == str(app.queue_page)
+            assert not app.links_box.get('1.0', 'end').strip()
+            app.pause_button.invoke()
+            wait(lambda: app.snapshot['pause_acknowledged'])
+            frozen = app.snapshot['received']
+            for width, height in ((1020, 760), (880, 680)):
+                root.geometry(f'{width}x{height}')
+                root.deiconify()
+                root.update()
+                for page in app.notebook.tabs():
+                    app.notebook.select(page)
+                    root.update()
+                    widgets = [app.start_button, app.pause_button, app.cancel_button]
+                    if page == str(app.queue_page):
+                        widgets += [app.download_button, app.add_button, app.file_actions_button]
+                        assert app.queue_tree.identify_region(30, 10) == 'heading', 'Downloads heading hidden'
+                        for identifier in app.queue_tree.get_children()[:3]:
+                            box = app.queue_tree.bbox(identifier)
+                            assert box and box[1] + box[3] <= app.queue_tree.winfo_height(), \
+                                f'Filename row {box} clipped in height {app.queue_tree.winfo_height()} at {width}x{height}, scale {scale}'
+                    elif page == str(app.review_page):
+                        widgets += [app.selected_button, app.review_saved_button]
+                    for widget in widgets:
+                        assert widget.winfo_ismapped(), f'{widget["text"]} hidden at {width}x{height}, scale {scale}'
+                        child = widget
+                        while child is not root:
+                            parent = child.master
+                            assert (0 <= child.winfo_x() and 0 <= child.winfo_y()
+                                    and child.winfo_x() + child.winfo_width() <= parent.winfo_width()
+                                    and child.winfo_y() + child.winfo_height() <= parent.winfo_height()), \
+                                f'{widget["text"]} clipped at {width}x{height}, scale {scale}'
+                            child = parent
+                    checked += 1
+                assert app.snapshot['received'] == frozen
+                if capture_dir and ((scale == 4 / 3 and width == 1020) or (scale == 2 and width == 880)):
+                    import ctypes
+                    from PIL import ImageGrab
+                    ancestor = ctypes.windll.user32.GetAncestor
+                    ancestor.argtypes, ancestor.restype = [ctypes.c_void_p, ctypes.c_uint], ctypes.c_void_p
+                    app.notebook.select(app.queue_page)
+                    root.update()
+                    capture_dir.mkdir(parents=True, exist_ok=True)
+                    name = 'windows-desktop.png' if scale == 4 / 3 else 'windows-small-large-text.png'
+                    ImageGrab.grab(window=ancestor(root.winfo_id(), 2)).save(capture_dir / name)
+            app.start_button.invoke()
+            wait(lambda: not app.snapshot['running'] and not app.snapshot['active'])
+            completed = [j for j in app.snapshot['jobs'] if j['status'] == 'completed']
+            assert completed and all(Path(j['path']).read_bytes() == BODY for j in completed)
+            assert app.pause_button.instate(['disabled']) and app.cancel_button.instate(['disabled'])
+        finally:
+            manager.post('close')
+            assert manager.closed.wait(3), 'Layout test coordinator did not close'
+            manager.thread.join(1)
+            app.destroy()
+    print(f'PASS: download and queue controls fully visible across {checked} mapped tab/size/scaling combinations', flush=True)
+
+
+def main(workspace=None, capture_dir=None):
+    print(f'Smoke PID {os.getpid()}; native Tk {tk.TkVersion}; brief mapped layout check then withdrawn windows; synthetic data only', flush=True)
     SyntheticClient.calls, SyntheticClient.fail_once = [], True
     with tempfile.TemporaryDirectory(prefix='tera-smoke-', dir=workspace or Path(__file__).parent) as directory, \
          patch('urllib.request.OpenerDirector.open', side_effect=AssertionError('Unexpected network')), \
          patch('tera_gui.profiles', side_effect=AssertionError('Unexpected real profile read')):
         base = Path(directory)
+        check_layout(base / 'layout', capture_dir)
+        SyntheticClient.calls, SyntheticClient.fail_once = [], True
         owned, errors = [], []
         expires = time.monotonic() + 50
 
@@ -244,12 +332,17 @@ def main(workspace=None):
             raise AssertionError(f'{label}: {app.status.get()}; ' + repr([(j['status'], j['error']) for j in (app.snapshot or {}).get('jobs', [])]))
 
         def submit(link, folder, per_share=False):
+            previous = {j['id'] for j in app.snapshot['jobs']}
             app.destination.set(str(folder))
             app.per_share.set(per_share)
             app.links_box.delete('1.0', 'end')
             app.links_box.insert('1.0', link)
             app.add_button.invoke()
-            wait(lambda: app.pending_add is None and not app.snapshot['review_busy'], 'review completed')
+            # A save acknowledgement can precede the first discovery snapshot.
+            wait(lambda: app.pending_add is None and not app.snapshot['review_busy']
+                 and any(j['id'] not in previous for j in app.snapshot['jobs'])
+                 and all(j['status'] not in {'unreviewed', 'reviewing'} for j in app.snapshot['jobs']
+                         if j['id'] not in previous), 'review completed')
 
         try:
             root, manager, app = create()
@@ -298,7 +391,7 @@ def main(workspace=None):
             app.toggle_review(SimpleNamespace(keysym='space'))
             wait(lambda: app.snapshot['jobs'][1]['status'] == 'excluded', 'exclude video')
             assert '2 selected' in app.review_summary.get()
-            app.download_button.invoke()
+            app.selected_button.invoke()
             wait(lambda: app.snapshot['received'] > 0, 'download start')
             app.pause_button.invoke()
             wait(lambda: app.snapshot['pause_acknowledged'], 'pause acknowledged')
@@ -318,19 +411,19 @@ def main(workspace=None):
             with patch('tera_gui.simpledialog.askstring', return_value='approved.mp4'):
                 app.rename_selected(app.review_tree)
             wait(lambda: any(j['output_name'] == 'approved.mp4' for j in app.snapshot['jobs']), 'rename selection')
-            app.download_button.invoke()
+            app.selected_button.invoke()
             wait(lambda: sum(j['status'] == 'pending' for j in app.snapshot['jobs']) == 4, 'append selection')
             assert app.snapshot['paused']
             last = next(j for j in app.snapshot['jobs'] if j['id'] == additions[-1]['id'])
             app.queue_tree.selection_set(last['id'])
             app.configure_controls()
-            app.up_button.invoke()
+            app.file_actions_menu.invoke(0)
             wait(lambda: [j['id'] for j in app.snapshot['jobs']].index(last['id']) < [j['id'] for j in app.snapshot['jobs']].index(additions[1]['id']), 'reorder')
-            app.remove_button.invoke()
+            app.file_actions_menu.invoke(2)
             wait(lambda: not any(j['id'] == last['id'] for j in app.snapshot['jobs']), 'remove pending')
             app.start_button.invoke()
             wait(lambda: not app.snapshot['paused'], 'resume for boundary')
-            app.boundary_button.invoke()
+            app.file_actions_menu.invoke(6)
             wait(lambda: app.snapshot['paused'] and not app.snapshot['active'], 'finish-current hold')
             assert sum(j['status'] == 'completed' for j in app.snapshot['jobs']) == 1
             assert app.boundary_button.instate(['disabled']) and app.start_button['text'] == 'Resume'
@@ -353,7 +446,7 @@ def main(workspace=None):
                 app.diagnostics_button.invoke()
             wait(lambda: 'Diagnostics saved' in app.status.get(), 'diagnostics export')
             report = (base / 'diagnostics.json').read_text(encoding='utf-8')
-            assert '0.1.0' in report and 'completed' in report
+            assert VERSION in report and 'completed' in report
             assert LINK not in report and 'approved.mp4' not in report and str(base) not in report
             app.history_tree.selection_set(completed[0]['id'])
             app.configure_controls()
@@ -375,7 +468,7 @@ def main(workspace=None):
             conflict = Path(pending['folder']) / pending['video']['name']
             conflict.parent.mkdir(parents=True)
             conflict.write_bytes(b'keep this file')
-            app.download_button.invoke()
+            app.selected_button.invoke()
             wait(lambda: any(j['status'] == 'attention' for j in app.snapshot['jobs']), 'conflict hold')
             app.queue_tree.selection_set(pending['id'])
             with patch('tera_gui.filedialog.askdirectory', return_value=str(base / 'corrected')):
@@ -385,14 +478,14 @@ def main(workspace=None):
             wait(lambda: any(j['id'] == pending['id'] and j['status'] == 'completed' for j in app.snapshot['jobs']), 'corrected file')
             assert conflict.read_bytes() == b'keep this file'
             submit(LINK.replace('synthetic', 'restorex'), base / 'restore')
-            app.download_button.invoke()
+            app.selected_button.invoke()
             wait(lambda: bool(app.snapshot['active']) and app.snapshot['received'] > 0, 'cancel transfer')
             app.cancel_button.invoke()
             wait(lambda: not app.snapshot['active'] and not app.snapshot['running'], 'cancel complete')
             assert not list(base.glob('restore/*.part'))
             assert app.pause_button.instate(['disabled']) and app.cancel_button.instate(['disabled'])
             submit(LINK.replace('synthetic', 'restore2x'), base / 'restore2')
-            app.download_button.invoke()
+            app.selected_button.invoke()
             wait(lambda: bool(app.snapshot['active']) and app.snapshot['received'] > 0, 'save/exit transfer')
             app.pause_button.invoke()
             wait(lambda: app.snapshot['pause_acknowledged'], 'save/exit pause')
@@ -435,7 +528,7 @@ def main(workspace=None):
                     response.read = interrupted
                 return response
             with patch.object(SyntheticClient, 'open', autospec=True, side_effect=interrupt_then_ignore):
-                app.download_button.invoke()
+                app.selected_button.invoke()
                 wait(lambda: any(j['id'] == identifier and j['status'] == 'restart' for j in app.snapshot['jobs']), 'rejected HTTP continuation', seconds=7)
             app.queue_tree.selection_set(identifier)
             app.configure_controls()

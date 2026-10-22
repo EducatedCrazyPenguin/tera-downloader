@@ -1,5 +1,48 @@
 # Tera roadmap implementation checklist
 
+## Quick-start redesign 0.2.0 — 22 October 2026
+
+- [x] User confirmed Download now for all videos, optional selection; selected Cinema programme.
+- [x] Implement quick discovery/queue action, preserving optional review, manual holds, duplicate protection and save/restore.
+- [x] Replace crowded configuration/toolbars with Settings and native File actions; keep transfer controls visible.
+- [x] Check mapped layout at 1020×760 and 880×680, Tk scaling 4/3 and 2; require headings and three complete queue rows.
+- [x] Fresh Impeccable reviewer scored all four fixes resolved; built tokens recorded in DESIGN.md and .impeccable/design.json.
+- [x] Full offline suite: 155 tests on Python 3.12.10; workspace temporary folders and synthetic/owned-loopback fixtures only.
+- [x] Final package and quiet installed upgrade/actual shortcut check.
+- [x] Implementation, documentation and release checks ready for Git publication.
+
+Source native smoke passed as PID 33780, including quick-start from a mapped button,
+optional selection, menu commands, Pause/Resume/Cancel, exact bytes, save/exit,
+held restoration and recovery/limits. A first packaged run failed without a step
+location; self-test-only diagnostics now record allowlisted module/line codes,
+without raw exception values. The harness now waits for fresh discovered rows,
+not merely the earlier save acknowledgement. A later packaged app/tray run passed
+(PIDs 38460/26148; owned quiet child 38804). Final payload verification follows.
+One existing three-second queue test timed out while a package build was also
+running; it passed alone in 0.267 seconds and the complete suite then passed
+serially. No assertion or timeout was weakened.
+
+**Evidence: 3/3 for recorded source/synthetic checks and reviewed captures; 2/3 for
+the whole product — live TeraBox behavior remains unverified. Installed release
+status is recorded below.**
+
+Final 0.2.0 payload passed the full synthetic packaged app harness (PID 24240)
+and native tray/quiet-launcher harness (PID 38516; owned child 23072), with Python
+removed from PATH. Quietly upgraded the existing per-user installation (installer
+PID 27112); installed ProductVersion/FileVersion are 0.2.0 and the executable
+SHA256 matches the build. Existing Desktop/Start-menu shortcut target, working
+directory, icon and empty arguments were checked. The actual Desktop shortcut
+launched with isolated TERA_DATA_DIR/APPDATA/LOCALAPPDATA (PID 12988), held its
+synthetic state lock, and saved/exited cleanly on its owned WM_CLOSE. No real
+Firefox/profile/download data was used. No owned final test process remains.
+
+Installer: `dist/Tera-0.2.0-Setup.exe`, SHA256
+`cade7dd1211cc1c6a1fe0be2c4f22e02e50eed12f92065bd39f18a24e9926342`.
+The 0.1.0 installer is retained for rollback. Installation keeps the same separate
+state location and database schema; current real queue contents were not read or
+used as fixtures. This UI release did not repeat the 0.1.0 synthetic uninstall
+retention campaign or test a clean Windows machine without Python installed.
+
 ## Personal release 0.1.0 — approved 20 October 2026
 
 - [x] P01 — Saved-byte verification progress and distinct recovery/wait messages; test cancellation, stale events and counters.
