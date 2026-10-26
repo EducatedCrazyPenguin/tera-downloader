@@ -1,5 +1,29 @@
 # Tera roadmap implementation checklist
 
+## Share metadata rejection investigation — 25 October 2026
+
+User reported `TeraBox rejected /api/shorturlinfo (code -3)` in installed 0.2.0
+and confirmed that Firefox lists the same share normally (user-reported).
+No production fix or replacement installation has been made for this error yet.
+
+With explicit permission, a read-only diagnostic used only the most recent saved
+matching failure and its selected Firefox source. Session and share-page checks
+completed; both the current request and a shorturl/root-only request returned -3
+(owned PID 7640). The separately approved one-page /share/list probe stopped
+without usable metadata (PID 16516). Its original privacy filter omitted the
+failure code, so this is not evidence of a particular file-list rejection code.
+Neither probe downloaded video, logged private values or wrote queue/browser data.
+
+The ignored `.tools/diagnose_share.py` now has self-checked code-only failure
+reporting and an optional browser-ID hypothesis check. It preserves an existing
+matching browserid, supplies a temporary host-only in-memory value only if absent,
+and performs no video request. Further live checks require explicit permission;
+the earlier two diagnostic permissions are already consumed.
+
+**Evidence: 3/3 for the reproduced shorturlinfo rejection and recorded probe
+outcomes; root cause remains unknown. The browser-ID explanation is a hypothesis,
+not a verified fix. Do not remove metadata/identity checks or ship a guessed fix.**
+
 ## Quick-start redesign 0.2.0 — 22 October 2026
 
 - [x] User confirmed Download now for all videos, optional selection; selected Cinema programme.
