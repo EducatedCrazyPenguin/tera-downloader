@@ -1,3 +1,24 @@
+# Queue ordering and bulk controls 0.9.0
+
+Implemented and installed 30 October 2026: multi-selection move/remove, Move next,
+and view-only filename/status filters. Active-item protection, saved order and
+minimum-size layout checks are recorded in todo.md. Parallel downloading and
+per-share groups remain outside this queue slice.
+
+Evidence: 3/3 for named local queue/native/package/install checks; provider
+transfer/playback was not exercised by this queue release.
+
+# Reliable website downloads 0.8.0
+
+Implemented and installed 29 October 2026. Durable verified website segments,
+one bounded provenance-based refresh, conservative playlist identity, protected
+state migration and installed shortcut verification are recorded in todo.md.
+Keep .ts output; MP4, concurrency and runtime repair/update remain deferred.
+Existing player-only jobs require manual regeneration when their source expires.
+
+Evidence: 2/3 — local recovery/release gates passed; full provider transfer and
+playback still require an explicitly approved small sample.
+
 # Quick-start redesign 0.2.0
 
 The user selected quick start (paste links and download all videos; selection is

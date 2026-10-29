@@ -1,6 +1,7 @@
 """Opt-in native check: brief mapped layout checks, then withdrawn synthetic flows.
 
-No profiles/settings from the user, shell opens, network, or child processes.
+No user profiles/settings or real providers. Headless Edge/loopback and local
+FFmpeg stream-copy helpers use synthetic data and owned, bounded processes.
 """
 import io
 from datetime import datetime, timedelta, timezone
@@ -248,6 +249,22 @@ def check_layout(base, capture_dir=None):
             app.pause_button.invoke()
             wait(lambda: app.snapshot['pause_acknowledged'])
             frozen = app.snapshot['received']
+            original_order=[j['id'] for j in app.snapshot['jobs']]
+            pending=[j['id'] for j in app.snapshot['jobs'] if j['status']=='pending']
+            assert len(pending)>=2
+            app.queue_tree.selection_set(pending)
+            app.move(-1)
+            wait(lambda:not app.up_button.instate(['disabled']))
+            app.queue_search.set('NO_MATCH_SYNTHETIC')
+            root.update()
+            assert not app.queue_tree.get_children() and app.remove_button.instate(['disabled'])
+            app.queue_search.set('')
+            app.queue_filter.set('Active')
+            root.update()
+            assert list(app.queue_tree.get_children())==[app.snapshot['active']]
+            assert [j['id'] for j in app.snapshot['jobs']]==original_order
+            app.queue_filter.set('All')
+            root.update()
             for width, height in ((1020, 760), (880, 680)):
                 root.geometry(f'{width}x{height}')
                 root.deiconify()
@@ -255,16 +272,28 @@ def check_layout(base, capture_dir=None):
                 for page in app.notebook.tabs():
                     app.notebook.select(page)
                     root.update()
-                    widgets = [app.start_button, app.pause_button, app.cancel_button]
+                    widgets = [app.start_button, app.pause_button, app.cancel_button, app.route_box, app.settings_button]
                     if page == str(app.queue_page):
-                        widgets += [app.download_button, app.add_button, app.file_actions_button]
+                        widgets += [app.download_button, app.add_button, app.file_actions_button, app.queue_search_entry, app.queue_filter_box]
                         assert app.queue_tree.identify_region(30, 10) == 'heading', 'Downloads heading hidden'
                         for identifier in app.queue_tree.get_children()[:3]:
                             box = app.queue_tree.bbox(identifier)
+                            if not box or box[1] + box[3] > app.queue_tree.winfo_height():
+                                print('LAYOUT_FAILURE', 'scale',scale,'requested',width,height,'actual',root.winfo_width(),root.winfo_height(),'tree',app.queue_tree.winfo_height(),'row',box,'scroll',app.queue_tree.yview(),flush=True)
                             assert box and box[1] + box[3] <= app.queue_tree.winfo_height(), \
                                 f'Filename row {box} clipped in height {app.queue_tree.winfo_height()} at {width}x{height}, scale {scale}'
                     elif page == str(app.review_page):
                         widgets += [app.selected_button, app.review_saved_button]
+                    elif page == str(app.settings_page):
+                        app.settings_tabs.select(app.connection_page.master.master)
+                        root.update()
+                        for widget in (app.helper_browser_box, app.helper_setup_button):
+                            assert widget.winfo_ismapped(), 'Browser setting hidden'
+                            canvas = app.connection_page.master
+                            assert canvas.winfo_rootx() <= widget.winfo_rootx()
+                            assert canvas.winfo_rooty() <= widget.winfo_rooty()
+                            assert widget.winfo_rootx()+widget.winfo_width() <= canvas.winfo_rootx()+canvas.winfo_width()
+                            assert widget.winfo_rooty()+widget.winfo_height() <= canvas.winfo_rooty()+canvas.winfo_height()
                     for widget in widgets:
                         assert widget.winfo_ismapped(), f'{widget["text"]} hidden at {width}x{height}, scale {scale}'
                         child = widget
@@ -300,6 +329,64 @@ def check_layout(base, capture_dir=None):
     print(f'PASS: download and queue controls fully visible across {checked} mapped tab/size/scaling combinations', flush=True)
 
 
+def check_proxy_settings(base):
+    """Withdrawn native save/validation/restart check, using no provider traffic."""
+    owned, errors = [], []
+    def create():
+        root = tk.Tk()
+        root.withdraw()
+        root.report_callback_exception = lambda kind, error, trace: errors.append(type(error).__name__)
+        manager = QueueManager(base / 'state', SyntheticClient)
+        app = TeraApp(root, manager, SyntheticClient, available_profiles=[])
+        owned.append((root, manager, app))
+        return root, manager, app
+    def wait(predicate):
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            if predicate():
+                assert not errors, errors
+                return
+            if not app.destroyed:
+                root.update()
+            time.sleep(.01)
+        raise AssertionError('Proxy settings native check timed out')
+    try:
+        root, manager, app = create()
+        wait(lambda: app.initialized)
+        assert not app.proxy_url.get() and app.proxy_entry.cget('show') == '*'
+        proxy = 'http://synthetic-user:synthetic-password@127.0.0.1:8080'
+        app.proxy_url.set(proxy)
+        app.proxy_save_button.invoke()
+        wait(lambda: app.snapshot['preferences'].get('proxy_url') == proxy)
+        assert b'synthetic-password' not in (base / 'state' / 'settings.json').read_bytes()
+        app.proxy_url.set('socks5://localhost:8080')
+        app.proxy_save_button.invoke()
+        assert 'HTTP CONNECT' in app.status.get()
+        assert app.snapshot['preferences']['proxy_url'] == proxy
+        app.close()
+        wait(lambda: app.destroyed)
+        root, manager, app = create()
+        wait(lambda: app.initialized)
+        assert app.proxy_url.get() == proxy and 'saved proxy' in app.connection_status.get()
+        app.proxy_url.set('')
+        app.proxy_save_button.invoke()
+        wait(lambda: not app.snapshot['preferences'].get('proxy_url'))
+        assert 'Direct connection' in app.connection_status.get()
+        app.close()
+        wait(lambda: app.destroyed)
+        assert not errors, errors
+        print('PASS: native masked proxy settings, protected save, invalid-address rejection, restart and clear-to-direct')
+    finally:
+        for root, manager, app in owned:
+            if not app.destroyed:
+                app.close()
+                deadline = time.monotonic() + 4
+                while not app.destroyed and time.monotonic() < deadline:
+                    root.update()
+                    time.sleep(.01)
+            assert app.destroyed and manager.closed.is_set(), 'Owned proxy test did not close'
+
+
 def main(workspace=None, capture_dir=None):
     print(f'Smoke PID {os.getpid()}; native Tk {tk.TkVersion}; brief mapped layout check then withdrawn windows; synthetic data only', flush=True)
     SyntheticClient.calls, SyntheticClient.fail_once = [], True
@@ -307,6 +394,9 @@ def main(workspace=None, capture_dir=None):
          patch('urllib.request.OpenerDirector.open', side_effect=AssertionError('Unexpected network')), \
          patch('tera_gui.profiles', side_effect=AssertionError('Unexpected real profile read')):
         base = Path(directory)
+        from stream_smoke import check_website_mode
+        check_website_mode(base / 'website')
+        check_proxy_settings(base / 'proxy')
         check_layout(base / 'layout', capture_dir)
         SyntheticClient.calls, SyntheticClient.fail_once = [], True
         owned, errors = [], []
@@ -422,10 +512,11 @@ def main(workspace=None, capture_dir=None):
             app.file_actions_menu.invoke(2)
             wait(lambda: not any(j['id'] == last['id'] for j in app.snapshot['jobs']), 'remove pending')
             app.start_button.invoke()
-            wait(lambda: not app.snapshot['paused'], 'resume for boundary')
+            wait(lambda: not app.snapshot['paused'] and bool(app.snapshot['active']), 'active transfer for boundary')
+            completed_before_boundary = sum(j['status'] == 'completed' for j in app.snapshot['jobs'])
             app.file_actions_menu.invoke(6)
             wait(lambda: app.snapshot['paused'] and not app.snapshot['active'], 'finish-current hold')
-            assert sum(j['status'] == 'completed' for j in app.snapshot['jobs']) == 1
+            assert sum(j['status'] == 'completed' for j in app.snapshot['jobs']) == completed_before_boundary + 1
             assert app.boundary_button.instate(['disabled']) and app.start_button['text'] == 'Resume'
             app.start_button.invoke()
             wait(lambda: not app.snapshot['running'] and not app.snapshot['active'] and any(j['status'] == 'failed' for j in app.snapshot['jobs']), 'remaining downloads')

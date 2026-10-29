@@ -18,5 +18,5 @@ def retry_delay(value, now=None):
 
 def can_retry(kind, attempts, checkpoint):
     return (kind in {'transient', 'expired'} and attempts < 2
-            and (not checkpoint.get('offset') or bool(checkpoint.get('etag')))
+            and (checkpoint.get('kind') == 'website' or not checkpoint.get('offset') or bool(checkpoint.get('etag')))
             and checkpoint.get('phase') != 'invalid')

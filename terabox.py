@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import http.cookiejar
 import json
 import os
@@ -88,6 +89,40 @@ def safe_name(name: str) -> str:
     return name
 
 
+def validate_proxy(value):
+    message = 'Enter an HTTP CONNECT proxy as http://[user:password@]host:port, or leave it blank for direct access.'
+    if not isinstance(value, str):
+        raise DownloadError(message)
+    value = value.strip()
+    if not value:
+        return ''
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        if (any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
+                or parsed.scheme != 'http' or not parsed.hostname
+                or parsed.port is None or not 1 <= parsed.port <= 65535
+                or parsed.path not in ('', '/') or parsed.query or parsed.fragment
+                or parsed.username is not None and (not parsed.username or parsed.password is None)):
+            raise ValueError
+    except ValueError:
+        raise DownloadError(message) from None
+    return value
+
+
+class AppProxy(urllib.request.ProxyHandler):
+    def __init__(self, url):
+        super().__init__({})
+        self.proxy = urllib.parse.urlsplit(validate_proxy(url))
+
+    def https_open(self, request):
+        # An explicit app setting must not be bypassed by system/no_proxy settings.
+        if self.proxy.username is not None:
+            credentials = ':'.join(urllib.parse.unquote(value) for value in (self.proxy.username, self.proxy.password))
+            token = base64.b64encode(credentials.encode('utf-8')).decode('ascii')
+            request.add_unredirected_header('Proxy-Authorization', 'Basic ' + token)
+        request.set_proxy(self.proxy.netloc.rsplit('@', 1)[-1], 'http')
+
+
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         validate_url(newurl)
@@ -103,7 +138,8 @@ class Video:
 
 
 class TeraBox:
-    def __init__(self, cancel=None, status=lambda text: None, firefox_profile=None, pause=None):
+    def __init__(self, cancel=None, status=lambda text: None, firefox_profile=None, pause=None, *, proxy_url=''):
+        self.proxy_url = validate_proxy(proxy_url)
         self.cancel = cancel or threading.Event()
         self.pause = pause
         self.status = status
@@ -119,9 +155,9 @@ class TeraBox:
                 raise DownloadError(str(error)) from None
             self.cookies = session.cookies
             self.session_origin = session.origin
-        # Do not inherit HTTP proxy settings. System VPN routing still applies.
+        # Only the explicitly saved app proxy is used; system VPN routing still applies.
         self.http = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), SafeRedirect(),
+            AppProxy(self.proxy_url) if self.proxy_url else urllib.request.ProxyHandler({}), SafeRedirect(),
             urllib.request.HTTPCookieProcessor(self.cookies))
         self.origin = ''
         self.token = ''
@@ -185,7 +221,9 @@ class TeraBox:
             error.close()
             raise DownloadError(f'TeraBox returned HTTP {error.code}. No external fallback was used.', kind=kind, retry_after=delay) from None
         except (urllib.error.URLError, TimeoutError, OSError):
-            raise DownloadError('Could not connect to TeraBox directly. If Firefox also cannot open the share, your network is blocking or interrupting TeraBox; this app does not route around that restriction.', kind='transient') from None
+            if self.proxy_url:
+                raise DownloadError('Could not connect through the Tera proxy. Check its address, credentials and availability. No direct fallback was used.', kind='transient') from None
+            raise DownloadError('Could not connect to TeraBox directly. If Firefox also cannot open the share, your network is blocking or interrupting TeraBox. Choose No VPN — Website above to use a generated player link.', kind='transient') from None
 
     def api(self, endpoint, params=None, body=None):
         query = {'app_id': 250528, 'web': 1, 'channel': 'dubox', 'clienttype': 0,
@@ -336,6 +374,7 @@ class TeraBox:
 
 
 def parse_links(text):
+    from website_stream import is_website_source, parse_source
     links = []
     for number, line in enumerate(text.splitlines(), 1):
         for value in line.split(','):
@@ -343,7 +382,10 @@ def parse_links(text):
             if not value:
                 continue
             try:
-                share_id(value)
+                if is_website_source(value):
+                    parse_source(value)
+                else:
+                    share_id(value)
             except DownloadError as error:
                 raise DownloadError(f'Invalid link on line {number}: {error}') from None
             links.append(value)
@@ -362,7 +404,9 @@ def download_queue(links, folder, firefox_profile, cancel, event=lambda *args: N
         _wait_for_download(cancel, pause, status)
         event('queue', (link_index, 'Opening share…'))
         try:
-            client = client_factory(cancel, status, firefox_profile, **({'pause': pause} if pause is not None else {}))
+            from website_stream import WebsiteStream, is_website_source
+            factory = WebsiteStream if is_website_source(link) and client_factory is TeraBox else client_factory
+            client = factory(cancel, status, None if is_website_source(link) else firefox_profile, **({'pause': pause} if pause is not None else {}))
             videos = client.find_videos(link)
         except Cancelled:
             raise

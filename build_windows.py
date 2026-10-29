@@ -33,6 +33,10 @@ def main():
     os.chdir(root)
     build = root / 'build'
     build.mkdir(exist_ok=True)
+    engine = root / '.tools' / 'stream-ffmpeg.exe'
+    expected = (root / 'third_party' / 'FFmpeg-SHA256.txt').read_text(encoding='ascii').split()[0]
+    if hashlib.sha256(engine.read_bytes()).hexdigest() != expected:
+        raise RuntimeError('The pinned local stream-copy engine does not match its recorded hash.')
     os.environ.update(TEMP=str(build), TMP=str(build), PYINSTALLER_CONFIG_DIR=str(build / 'pyinstaller-cache'))
     from PIL import Image, ImageDraw
     image = Image.new('RGB', (256, 256), '#A5262D')
@@ -60,6 +64,8 @@ def main():
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, target)
     shutil.copy2(Path(sys.base_prefix) / 'LICENSE.txt', notices / 'Python-LICENSE.txt')
+    for notice in ('FFmpeg-GPLv3.txt', 'FFmpeg-NOTICE.txt', 'FFmpeg-SHA256.txt', 'Camoufox-NOTICE.txt'):
+        shutil.copy2(root / 'third_party' / notice, notices / notice)
     import tkinter
     if tkinter.Tcl().call('info', 'patchlevel') != '8.6.15':
         raise RuntimeError('Update the pinned Tcl license for this runtime before packaging.')

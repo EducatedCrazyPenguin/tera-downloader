@@ -1,9 +1,9 @@
 # Tera — local TeraBox downloader
 
-## Windows release 0.2.0
+## Windows release 0.9.0
 
 The personal Windows x64 package bundles Python, Tkinter and tray support. Run
-`Tera-0.2.0-Setup.exe`, then use **Tera** on the Desktop or Start menu. Python
+`Tera-0.9.0-Setup.exe`, then use **Tera** on the Desktop or Start menu. Python
 installation and `.pyw` associations are not needed for the packaged app.
 Installation is per user under `%LOCALAPPDATA%\Programs\Tera`; saved state stays
 under `%LOCALAPPDATA%\Tera`. No administrator access, autostart, browser launch,
@@ -11,9 +11,10 @@ automatic update, reboot or post-install app launch is configured.
 
 Exit Tera before upgrading or uninstalling. A Windows mutex makes the installer
 refuse while Tera is running; it does not close the app. Installation and
-uninstall leave queue/settings, owned partial files and completed downloads in
-their separate locations. Keep the previous installer for rollback; this release
-does not change the database schema. These personal builds are unsigned.
+uninstall leave queue/settings, helper browser profiles, owned partial files and completed downloads in
+their separate locations. This release migrates state to version 2. Keep the
+previous installer and both pre-migration backups for rollback; older versions
+reject version-2 state. These personal builds are unsigned.
 
 For a new destination, Tera uses the Windows Downloads folder's **Tera** subfolder,
 including redirected Downloads locations. Saved destinations take precedence.
@@ -40,6 +41,141 @@ existing files are never overwritten. `activity.log` and
 exceptions, filenames, folders, links, account details and credentials are
 excluded; exports revalidate log entries and nothing is uploaded. Logging
 failure does not stop a download or replace the queue.
+
+## Queue ordering and filters
+
+Use Ctrl-click or Shift-click to select multiple queue rows, then **File actions**:
+**Move up / Move down** moves selected pending jobs together while preserving
+their queue order. **Move next** puts selected pending jobs ahead of other pending
+work and waiting retries, without stopping the current transfer. **Remove pending**
+removes the selected eligible jobs and their owned partial data; completed files
+are preserved. Mixed selections containing active/ineligible jobs are rejected
+before anything is changed. New order and removals survive restart.
+
+**Find in queue** matches filenames without regard to case. The adjacent status
+filter offers All, Pending, Active, Waiting and Needs attention. Filtering changes
+only the view; hidden selections are cleared and cannot receive bulk actions.
+Clear the search and choose All to see the full queue. Starting the queue still
+uses the saved queue order, including rows hidden by filters. Search/filter
+choices reset when reopening; actual job order remains saved.
+
+Evidence: 3/3 for the named synthetic queue and native view checks; full real
+provider transfer remains outside these queue checks.
+
+## Website downloads without a VPN
+
+The top **Route for new links** choice is explicit and remembered:
+
+- **VPN available — Direct** uses the existing original-file TeraBox route and
+  selected Firefox login. It does not start, stop or detect a VPN.
+- **No VPN — Website** accepts original share links, generated TeraDownloader
+  player links and its supported `play.terafile.workers.dev` relay links.
+  **Settings → Connection → Website browser** chooses Camoufox, Firefox or Edge.
+  With **Camoufox**, Download now resolves original shares in the background,
+  uses the ordinary Watch Online controls, captures player links and continues
+  into Tera's existing queue. No browser paste or click is normally needed.
+  Firefox and Edge retain their separate visible helper windows and manual
+  verification option. Existing saved browser choices are preserved.
+
+Camoufox uses an optional, separately installed runtime: native browser
+**158.0-beta.40**, Node **24.22.1**, Playwright Core **1.62.1**, and official uBlock
+Origin **1.75.0**. It does not import the Camoufox Python SDK or load/download its
+fingerprint model. The browser is isolated from everyday browser profiles. It is
+an experimental custom browser; a successful verification today does not
+guarantee future website acceptance. No paid solver or token replay service is
+used. [Camoufox source and release](https://github.com/daijro/camoufox/releases/tag/v158.0-beta.40),
+[Playwright persistent contexts](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context).
+
+The optional runtime lives under `%LOCALAPPDATA%\Tera\browser-runtime\camoufox-158.0-beta.40`
+and occupies roughly 2.6 GB. It is separate from the small Tera installer and
+is not automatically downloaded or updated. `install_camoufox_runtime.py`
+installs from local browser ZIP, signed uBlock XPI, Node executable/license and
+Playwright Core directory. It validates pinned browser/Node/XPI SHA256 hashes,
+checks Playwright's version, rejects unsafe archive paths and records extracted
+file hashes. No existing runtime directory is overwritten. See
+`third_party/Camoufox-NOTICE.txt` for provenance and the script's `--help` for
+local asset arguments. A missing runtime produces an actionable error; Tera
+does not silently select a different browser. The runtime remains after a Tera
+uninstall, alongside retained app state.
+
+Each browser has a separate Tera-owned profile under the app's data folder,
+`browser-profiles/camoufox`, `browser-profiles/firefox` or `browser-profiles/edge`.
+These retain website cookies, cache, extensions and settings between attempts.
+Tera does not copy or control your everyday Firefox/Edge profile. **Set up
+browser…** explicitly opens the Firefox or Edge helper for extension management; close
+that window or click Done. Setup closes after ten minutes. Camoufox loads its
+included uBlock on each launch; its extension-setup button is disabled because
+native settings-page automation has not passed here. The separate Firefox helper on this machine
+also has the previously requested official uBlock installed.
+[Official uBlock Origin](https://addons.mozilla.org/en-US/firefox/addon/ublock-origin/).
+
+Opening the website sends it the share. Camoufox uses a private local pipe with
+Tera; share/player links are not command-line arguments or activity-log entries.
+Cancellation closes only the owned Node/browser process tree. Browser capture
+blocks media, player navigation and unrelated top-level navigation. Ordinary
+HTTPS subresources are allowed so website scripts can work; uBlock provides
+its own filtering. Safe Browsing, blocklist and signature-check preferences are
+explicitly enabled, but full protection backend equivalence to stock Firefox
+has not been verified. Use this isolated browser for the helper flow.
+
+Resolution allows up to three minutes per share and up to one minute for initial
+loading, ending sooner on an explicit navigation failure. A site outage,
+uncompleted verification or changed website controls can still prevent capture.
+There is no automatic retry or VPN switching. On failure, use **Retry small
+browser**, or **Open in normal browser instead** / **Use pasted player links**.
+Already-generated player links remain valid inputs in the main box.
+If Firefox logs a Turnstile failure, Tera shows its numeric code while leaving
+the bounded verification window available. This is an observed failure report,
+not a bypass or an identification of the exact detection signal.
+Cancel/app exit close only the owned helper process tree; profiles are retained.
+Capture blocks media requests, and helper setup permits normal extension installs.
+Temporary synthetic test profiles are separate from these saved profiles.
+
+Website mode saves a **streaming copy (.ts)**, not the original MP4. It accepts
+finite, unencrypted MPEG-TS playlists, including timestamp discontinuities.
+Each listed segment must arrive with a matching positive Content-Length and
+valid TS packet framing; one missing/short/unsupported segment fails the file.
+The bundled, pinned FFmpeg executable joins local segments with stream copy;
+it cannot fetch network inputs. A final file appears only after assembly and
+validation, and existing files are never overwritten. Keep the .ts extension.
+
+Stream totals are unknown until completion; the UI shows transferred bytes and
+segment progress without inventing an original-file size. Extra temporary space
+is needed for downloaded segments and the assembled copy, approximately twice
+the stream size. Current source support does not cover encrypted, master,
+fMP4 or byte-range playlists. Stream resolution/audio/quality may differ from
+the original. File format support in your media player is separate.
+
+Pause/cancel and run limits apply to the queue. Pause holds further network reads
+and final publication; an already-running local assembly can finish while paused.
+Completed, validated segments are flushed and checkpointed in an owned workspace
+beside the destination. Exit and recoverable failures preserve them. Reopening
+waits for Start, verifies local hashes and requests only missing segments. Explicit
+Cancel, Skip and Restart discard that job's owned workspace. A changed playlist
+or altered saved segment requires an explicit restart; files are not mixed.
+
+The existing two-attempt budget applies. A rejected relay link can trigger one
+Camoufox refresh on the second attempt when its original share was retained.
+Only a single unambiguous refreshed source is accepted, and saved segments are
+reused only when the complete playlist fingerprint matches. Pasted player links
+without provenance need manual regeneration. New bytes alone count against run
+limits. Progress reports verified segments, saved bytes and current stage.
+
+State version 2 protects original shares with DPAPI. Upgrading a version-1 queue
+creates queue.before-v2.sqlite using SQLite backup and settings.before-v2.json.
+Older Tera versions reject version-2 state without modifying it. Restore both
+pre-migration backups to roll back; do not copy only an active SQLite main file.
+
+Saved user-supplied player URLs are protected with current-user Windows DPAPI;
+they are not written to activity logs. Route selection applies to new jobs and
+does not convert existing queued original-file jobs.
+
+**Evidence: 3/3 for automatic player generation and accepted text-playlist
+metadata in the named live Camoufox test; 2/3 for complete real-video delivery.
+The user-provided share resolved with native Camoufox 158.0-beta.40 and returned
+one supported video with 615 playlist segments. No real video was downloaded.
+Playback, audio/quality, full transfer and future provider availability remain
+unverified. Local synthetic browser/queue checks cover their stated boundaries.**
 
 ## Use it
 
@@ -219,7 +355,8 @@ expose cookie export, so signing in there alone does not connect this downloader
 - Saved source links and share access codes are encrypted with current-user
   Windows DPAPI. Filenames, destinations and history are local metadata and can
   be cleared. Cookies, account identifiers, page tokens and signed media URLs
-  are never stored in the queue. Protection/save failures are reported; there
+  from the original-file route are never stored in the queue. Explicitly pasted
+  website player URLs are protected source links. Protection/save failures are reported; there
   is no plaintext fallback. DPAPI is tied to the Windows account and does not
   protect against programs already running as that user.
 - Partial paths use random owned `.tera-….part` names. The local queue also stores
@@ -233,12 +370,26 @@ expose cookie export, so signing in there alone does not connect this downloader
   unfinished authenticated jobs. Re-add those shares with your chosen source;
   retry never silently switches them to anonymous access. Firefox login/data
   remain untouched. Each queued row displays its own login source.
-- Requests and redirects are limited to supported TeraBox domains. There are no
-  external download proxies, link resolvers, telemetry or cookie uploads.
-- A system VPN applies normally. A Firefox-only VPN extension does not route
-  this app. Tera does not verify or enforce VPN connectivity. If Firefox itself
-  cannot open a share without a VPN, the network is blocking or interrupting
-  TeraBox; Tera uses direct connections only and cannot bypass that restriction.
+- Direct requests and redirects are limited to supported TeraBox domains.
+  The explicit website mode uses only its supported HTTPS relay; it does not
+  inherit the direct-mode proxy or Firefox cookies. There is no telemetry.
+- **Settings → Connection** accepts an optional trusted HTTP CONNECT proxy as
+  `http://[user:password@]host:port`. Leave it blank and save to use direct access.
+  The address is masked and stored using current-user Windows DPAPI. Change it
+  while the queue, review and login checks are stopped. It applies to the desktop
+  app's login checks, share review and downloads; an unavailable proxy fails
+  without direct fallback. HTTPS certificate validation and supported-domain
+  restrictions remain enabled. SOCKS and TLS connections to the proxy itself
+  are not supported; the TeraBox connection uses HTTPS through the HTTP tunnel.
+- Tera does not supply a proxy or guarantee that one can reach TeraBox. A working
+  proxy may avoid needing a system VPN for Tera's requests. Firefox login still
+  uses Firefox's own network settings. A system VPN applies normally; a
+  Firefox-only VPN extension does not route Tera. Saving an address does not
+  perform a live connection check.
+
+**Proxy evidence: 2/3 — A synthetic local HTTPS CONNECT download and offline
+checks cover routing, TLS validation, exact bytes, credentials and call paths.
+Real TeraBox access through an external proxy remains unverified.**
 
 ## Verification and limits
 
@@ -249,7 +400,8 @@ the shared file metadata. The new queue/UI was checked with synthetic data.
 Some shares do not provide download URLs without an authenticated session.
 
 Original files are kept temporary until the byte count matches the share size.
-Previews and HLS playlists are rejected. Existing files are not overwritten;
+The original-file route rejects previews and HLS playlists. Website streaming
+copies use the separate validated path described above. Existing files are not overwritten;
 explicit cancellation removes only the owned temporary file. A queue
 continues after an individual link or video fails and shows the completed and
 failed items at the end. Pause keeps the current connection and downloaded bytes

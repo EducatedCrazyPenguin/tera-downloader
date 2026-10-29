@@ -19,9 +19,11 @@ from firefox_session import FirefoxProfile
 from review_storage import (StorageError, available_space, input_key, preflight, prior_download,
                             required_space, share_folder, share_key, target_paths)
 from terabox import Cancelled, DownloadError, PAUSED_STATUS, TeraBox, parse_links, _wait_for_download
-from terabox import safe_name
+from terabox import safe_name, validate_proxy
+from website_stream import WebsiteStream, is_website_source
 from recovery import can_retry
 from transfer_state import Checkpoint, RestartRequired, fresh_checkpoint
+from stream_checkpoint import StreamCheckpoint, fresh_stream
 from run_policy import BandwidthLimiter, RunPolicy, TransferPolicy, local_now, validate_options
 
 
@@ -59,6 +61,8 @@ class SpeedMeter:
 class Job:
     id: str
     link: str = field(repr=False)
+    # Provenance is encrypted by StateStore, never serialized as plaintext.
+    origin_share: str = field(default='',repr=False,kw_only=True)
     folder: str = ''
     profile: dict | None = None
     video: dict | None = None
@@ -154,7 +158,7 @@ class QueueManager:
                     parse_links(job.link)
                     if job.status not in TERMINAL | REVIEW | HOLDS | {'pending', 'resolving', 'downloading', 'retry_wait'}:
                         raise ValueError('Invalid status')
-                    if job.video and (set(job.video) != {'name', 'size', 'fid'} or int(job.video['size']) <= 0):
+                    if job.video and (set(job.video) != {'name', 'size', 'fid'} or type(job.video['size']) is not int or job.video['size'] < 0 or job.video['size'] == 0 and not is_website_source(job.link)):
                         raise ValueError('Invalid metadata')
                     if job.status == 'reviewing':
                         job.status = 'unreviewed'
@@ -261,7 +265,8 @@ class QueueManager:
     def _checkpoint_state(self, job, commit=lambda value: True, discard=None):
         if not job.video:
             raise RestartRequired('A checkpoint requires reviewed file metadata.')
-        return Checkpoint(job.checkpoint, job.folder, job.output_name or job.video['name'], job.video['size'],
+        factory = StreamCheckpoint if is_website_source(job.link) else Checkpoint
+        return factory(job.checkpoint, job.folder, job.output_name or job.video['name'], job.video['size'],
                           self._binding(job), commit, discard or threading.Event())
 
     def _discard(self, job):
@@ -270,7 +275,8 @@ class QueueManager:
                 if not isinstance(job.checkpoint, dict) or not job.video:
                     raise RestartRequired()
                 # Disconnect can clear the login reference; ownership still requires the recorded file ID.
-                Checkpoint(job.checkpoint, job.folder, job.output_name or job.video['name'], job.video['size'],
+                factory = StreamCheckpoint if is_website_source(job.link) else Checkpoint
+                factory(job.checkpoint, job.folder, job.output_name or job.video['name'], job.video['size'],
                            job.checkpoint.get('binding'), lambda value: True, threading.Event()).discard_owned()
             except RestartRequired:
                 pass  # An invalid ownership record cannot authorize deleting a file.
@@ -375,8 +381,13 @@ class QueueManager:
                 if old:
                     added.append(old)
                 else:
-                    job = Job(uuid.uuid4().hex, link, folder, reference, status='unreviewed', per_share=bool(data.get('per_share')))
+                    job = Job(uuid.uuid4().hex, link, folder, None if is_website_source(link) else reference, status='unreviewed', per_share=bool(data.get('per_share')))
                     self.jobs.append(job)
+                    origin = data.get('origins',{}).get(link,'')
+                    if origin:
+                        from terabox import share_id
+                        share_id(origin)
+                    job.origin_share = origin
                     added.append(job)
             self._save()
             self.review_requested.update(j.id for j in added)
@@ -417,6 +428,8 @@ class QueueManager:
                 name = data['name']
                 if action == 'destinations' or not name or name != safe_name(name):
                     raise DownloadError('Use a plain, safe file name without folders or reserved characters.')
+                if is_website_source(jobs[0].link) and Path(name).suffix.lower() != '.ts':
+                    raise DownloadError('Keep the .ts extension for a website streaming copy.')
                 if not jobs[0].video:
                     raise DownloadError('Review the share before choosing a file name.')
             if 'folder' in data:
@@ -491,7 +504,7 @@ class QueueManager:
             folder = str(Path(data['folder']).resolve())
             profile = data.get('profile')
             reference = {'name': profile.name, 'path': str(profile.path)} if profile else None
-            added = [Job(uuid.uuid4().hex, link, folder, reference) for link in links]
+            added = [Job(uuid.uuid4().hex, link, folder, None if is_website_source(link) else reference) for link in links]
             self.preferences = self.store.save_preferences({'last_destination': folder})
             self.jobs.extend(added)
             if self.running:
@@ -502,8 +515,16 @@ class QueueManager:
             return [job.id for job in added]
         if action == 'preferences':
             changes = data['changes']
-            if not set(changes) <= {'firefox_profile', 'last_destination', 'favorites', 'notifications'}:
+            if not set(changes) <= {'firefox_profile', 'last_destination', 'favorites', 'notifications', 'proxy_url', 'connection_mode', 'website_browser'}:
                 raise DownloadError('Unsupported preference.')
+            if 'connection_mode' in changes and changes['connection_mode'] not in ('direct', 'website'):
+                raise DownloadError('Choose a supported connection route.')
+            if 'website_browser' in changes and changes['website_browser'] not in ('firefox', 'edge', 'camoufox'):
+                raise DownloadError('Choose Camoufox, Firefox or Edge for website downloads.')
+            if 'proxy_url' in changes:
+                if self.running or self.active or self.review_active:
+                    raise DownloadError('Stop the queue and share review before changing the connection.')
+                changes = dict(changes, proxy_url=validate_proxy(changes['proxy_url']))
             if 'notifications' in changes and not isinstance(changes['notifications'], bool):
                 raise DownloadError('Notifications must be on or off.')
             if 'firefox_profile' in changes and changes['firefox_profile'] is not None and not isinstance(changes['firefox_profile'], str):
@@ -577,27 +598,42 @@ class QueueManager:
                 else:
                     self._handle('pause', {})
             return
-        if action == 'move':
-            job = self._job(data['job_id'])
-            if job.status != 'pending':
-                raise DownloadError('Only pending jobs can be reordered.')
-            indexes = [i for i, j in enumerate(self.jobs) if j.status == 'pending']
-            position = indexes.index(self.jobs.index(job))
-            target = max(0, min(len(indexes) - 1, position + int(data['direction'])))
-            first, second = indexes[position], indexes[target]
-            self.jobs[first], self.jobs[second] = self.jobs[second], self.jobs[first]
+        if action in {'move','move_next'}:
+            identifiers = list(dict.fromkeys(data.get('job_ids', [data.get('job_id')]) or []))
+            if not identifiers:return
+            selected = [self._job(identifier) for identifier in identifiers]
+            if any(j.status != 'pending' or j.id == self.active for j in selected):
+                raise DownloadError('Select only pending jobs to reorder; the active file stays in place.')
+            chosen = set(identifiers)
+            if action == 'move_next':
+                promoted = [j for j in self.jobs if j.id in chosen]
+                remaining = [j for j in self.jobs if j.id not in chosen]
+                position = next((i for i,j in enumerate(remaining) if j.status in {'pending','retry_wait'}),len(remaining))
+                self.jobs = remaining[:position]+promoted+remaining[position:]
+            else:
+                direction = data['direction']
+                if type(direction) is not int or direction not in (-1,1):
+                    raise DownloadError('Choose Move up or Move down.')
+                slots = [i for i,j in enumerate(self.jobs) if j.status == 'pending']
+                pending = [self.jobs[i] for i in slots]
+                positions = range(1,len(pending)) if direction == -1 else range(len(pending)-2,-1,-1)
+                for i in positions:
+                    other=i+direction
+                    if pending[i].id in chosen and pending[other].id not in chosen:
+                        pending[i],pending[other]=pending[other],pending[i]
+                for i,job in zip(slots,pending):self.jobs[i]=job
             self._save()
             return
         if action == 'remove':
-            job = self._job(data['job_id'])
-            if job.status not in {'pending', 'attention'} | REVIEW:
-                raise DownloadError('Only pending jobs can be removed. Use Skip for the active file.')
-            if job.id == self.review_active:
-                raise DownloadError('Wait for this review to finish before removing it.')
-            self._discard(job)
-            self.jobs.remove(job)
-            self.review_requested.discard(job.id)
-            self.quick_requested.discard(job.id)
+            identifiers = list(dict.fromkeys(data.get('job_ids',[data.get('job_id')]) or []))
+            selected = [self._job(identifier) for identifier in identifiers]
+            if any(j.status not in {'pending','attention'} | REVIEW or j.id in (self.active,self.review_active) for j in selected):
+                raise DownloadError('Select only pending or held storage items to remove. Active files and reviews are protected.')
+            for job in selected:self._discard(job)
+            for job in selected:
+                self.jobs.remove(job)
+                self.review_requested.discard(job.id)
+                self.quick_requested.discard(job.id)
             self._save()
             return
         if action == 'retry':
@@ -699,10 +735,13 @@ class QueueManager:
                     try:
                         info = Path(value).stat()
                         job.receipt = {'size': info.st_size, 'mtime_ns': info.st_mtime_ns}
+                        if is_website_source(job.link):
+                            job.video['size'] = job.received = info.st_size
                     except OSError:
                         job.receipt = {}
                 elif self.intent == 'close':
                     job.status, job.received = 'pending', job.checkpoint.get('offset', 0)
+                    if is_website_source(job.link):job.cycle_attempts = 0
                 elif self.error_hold:
                     job.status, job.received = 'pending', job.checkpoint.get('offset', 0)
                 elif self.intent in ('skip', 'cancel'):
@@ -722,7 +761,7 @@ class QueueManager:
                     if can_retry(kind, job.cycle_attempts, job.checkpoint):
                         job.status, job.retry_due = 'retry_wait', time.time() + data.get('retry_after', 5)
                         self.message = 'Connection interrupted. One bounded retry is waiting; Pause or Cancel remains available.'
-                    elif kind in {'transient', 'expired'} and job.received and not job.checkpoint.get('etag'):
+                    elif kind in {'transient', 'expired'} and job.received and not job.checkpoint.get('etag') and job.checkpoint.get('kind') != 'website':
                         job.status, job.error_kind = 'restart', 'restart'
                         job.error = 'Saved bytes have no strong server validator. Choose Restart from zero explicitly.'
                         self.pause.set()
@@ -791,14 +830,14 @@ class QueueManager:
         job.cycle_attempts += 1
         job.retry_due = 0
         if job.video and not job.checkpoint:
-            job.checkpoint = fresh_checkpoint(self._binding(job))
+            job.checkpoint = (fresh_stream if is_website_source(job.link) else fresh_checkpoint)(self._binding(job))
         job.received = job.checkpoint.get('offset', 0)
         job.status = 'downloading' if job.video else 'resolving'
         self.cancel = threading.Event()
         self.discard_current = threading.Event()
         self.meter.reset(job.received)
         self._save()
-        pending = [(j.folder, j.video['size'] - j.checkpoint.get('offset', 0)) for j in self.jobs if j.video and j.status in {'pending', 'downloading'}]
+        pending = [(j.folder, max(0,j.video['size'] - j.checkpoint.get('offset', 0))) for j in self.jobs if j.video and j.status in {'pending', 'downloading'}]
         diagnostics.record(self.directory, 'attempt', attempt=job.cycle_attempts, received=job.received)
         self.worker = threading.Thread(target=self._transfer, args=(deepcopy(job), self.cancel, pending, self.discard_current),
                                        name='Tera transfer', daemon=True)
@@ -810,20 +849,21 @@ class QueueManager:
         for other in self.jobs:
             if other.id == job.id or not other.video:
                 continue
-            if (other.identity, other.video['fid'], other.video['size']) != (job.identity, job.video['fid'], job.video['size']):
+            if ((other.identity, other.video['fid']) != (job.identity, job.video['fid'])
+                    or other.video['size'] and job.video['size'] and other.video['size'] != job.video['size']):
                 continue
             if other.status in {'pending', 'downloading', 'resolving', 'attention'}:
                 return 'Already queued.'
-            if other.status == 'completed' and prior_download(other.path, other.receipt, job.video['size']):
+            if other.status == 'completed' and prior_download(other.path, other.receipt, job.video['size'] or other.video['size']):
                 return 'Prior download: recorded size and modification time still match.'
             if in_review and other.status == 'review' and self.jobs.index(other) < self.jobs.index(job):
                 return 'Already selected in Review.'
         return ''
 
     @staticmethod
-    def _metadata(videos):
+    def _metadata(videos, website=False):
         if not videos or any(not isinstance(v.name, str) or not v.name or not isinstance(v.fid, str) or not v.fid
-                             or not isinstance(v.size, int) or isinstance(v.size, bool) or v.size <= 0 for v in videos):
+                             or not isinstance(v.size, int) or isinstance(v.size, bool) or v.size < 0 or v.size == 0 and not website for v in videos):
             raise DownloadError('TeraBox returned invalid file metadata. No file was downloaded.')
         result, seen = [], set()
         for video in videos:
@@ -848,12 +888,20 @@ class QueueManager:
         self.review_worker = threading.Thread(target=self._review, args=(deepcopy(job), self.review_cancel), name='Tera review', daemon=True)
         self.review_worker.start()
 
+    def _client(self, job, cancel, status, pause=None):
+        website = is_website_source(job.link)
+        reference = job.profile if not website else None
+        profile = FirefoxProfile(reference['name'], Path(reference['path'])) if reference else None
+        factory = WebsiteStream if website and self.client_factory is TeraBox else self.client_factory
+        options = {'pause': pause} if pause is not None else {}
+        if not website and self.preferences.get('proxy_url'):
+            options['proxy_url'] = self.preferences['proxy_url']
+        return factory(cancel, status, profile, **options)
+
     def _review(self, job, cancel):
         try:
-            reference = job.profile
-            profile = FirefoxProfile(reference['name'], Path(reference['path'])) if reference else None
-            client = self.client_factory(cancel, lambda text: None, profile)
-            videos = self._metadata(client.find_videos(job.link))
+            client = self._client(job, cancel, lambda text: None)
+            videos = self._metadata(client.find_videos(job.link), is_website_source(job.link))
             value, outcome = (share_key(job.link, getattr(client, 'metadata', {})), videos), 'discovered'
         except Cancelled:
             value, outcome = '', 'cancelled'
@@ -889,17 +937,31 @@ class QueueManager:
                 # Other chosen folders on the same disk also consume the available space.
                 needed = required_space(job.folder, pending)
                 preflight(job.folder, needed, job.output_name or job.video['name'], job.video['fid'])
-            reference = job.profile
-            profile = FirefoxProfile(reference['name'], Path(reference['path'])) if reference else None
-            client = self.client_factory(cancel, lambda text: emit('_status', text=text), profile, pause=self.pause)
-            videos = client.find_videos(job.link)
+            if job.video and is_website_source(job.link):
+                preflight(job.folder, 0, job.output_name or job.video['name'], job.video['fid'])
+            client = self._client(job, cancel, lambda text: emit('_status', text=text), self.pause)
+            source = job.link
+            if is_website_source(source) and job.error_kind == 'expired' and job.cycle_attempts == 2:
+                if not job.origin_share:
+                    raise RestartRequired('This player link has no original share. Generate a fresh player link manually; saved segments were kept.')
+                client.check_cancel()
+                from edge_helper import resolve_shares
+                emit('_status',text='Refreshing the rejected link once with Camoufox…')
+                candidates = resolve_shares([job.origin_share],cancel,lambda text:emit('_status',text=text),browser='camoufox',profile_dir=Path(self.directory)/'browser-profiles'/'camoufox')
+                client.check_cancel()
+                if len(candidates)!=1:raise RestartRequired('The refreshed share has multiple candidates. Select the file again; saved segments were kept.')
+                source=candidates[0]
+            videos = client.find_videos(source)
             if not videos:
                 raise DownloadError('No supported videos were found.')
             if job.video is None:
-                value = self._metadata(videos)
+                value = self._metadata(videos, is_website_source(job.link))
                 outcome = 'discovered'
             else:
                 video = next((v for v in videos if v.fid == job.video['fid']), None)
+                if state and is_website_source(job.link) and state.record['manifest']:
+                    if state.record['manifest'] != client.manifest:raise RestartRequired('The playlist changed; saved segments were preserved. Choose Restart from zero.')
+                    video = videos[0] if len(videos)==1 else None
                 if (video is None or video.size != job.video['size'] or video.name != job.video['name']
                         or job.identity and share_key(job.link, getattr(client, 'metadata', {})) != job.identity):
                     raise RestartRequired('The selected file changed or is no longer available. Review it again before restarting.')
@@ -940,7 +1002,7 @@ class QueueManager:
         members = [j for j in self.jobs if j.id in self.run_ids and j.status not in {'skipped', 'cancelled'}]
         total = sum(j.video['size'] for j in members if j.video)
         received = sum(j.received for j in members)
-        unknown = any(not j.video for j in members)
+        unknown = any(not j.video or not j.video['size'] for j in members)
         speed = self.meter.rate_at(time.monotonic()) if current and current.video and not self.pause.is_set() and not self.intent and self.verification is None else 0
         held = bool(self.policy_hold and not self.active and self.running)
         return deepcopy({'jobs': [asdict(j) for j in self.jobs], 'preferences': self.preferences,

@@ -1,0 +1,22 @@
+Optional local browser runtime (not inside the Tera setup executable).
+Camoufox 158.0-beta.40: https://github.com/daijro/camoufox/releases/tag/v158.0-beta.40
+Source: https://github.com/daijro/camoufox (MPL-2.0; see upstream/component notices)
+Windows x64 ZIP SHA256: 2d3e33207c2d5853e817e8317f0e33124ffb7054bd5102c8b84546e3d15a6447
+Node.js 24.22.1: https://github.com/nodejs/node/tree/v24.22.1
+Executable SHA256: 6d75619e8720161bb0e8c5617bcf90384b48a920b9182ec6e9d52f11f83a8e84
+Official Node LICENSE is retained as Node-LICENSE.txt in the runtime.
+Playwright Core 1.62.1: https://github.com/microsoft/playwright (Apache-2.0)
+Original LICENSE/NOTICE and package sources remain in playwright-core/.
+uBlock Origin 1.75.0: https://addons.mozilla.org/en-US/firefox/addon/ublock-origin/
+Source: https://github.com/gorhill/uBlock (GPL-3.0)
+Official signed XPI SHA256: 5b74415860456370644bd80f16125e865b0e6c356bb5dfcfb84069967eaa5287
+The original add-on payload is extracted without changes into addons/ublock/.
+
+Tera's launcher configuration restores selected protection preferences. This is
+not verification that every stock Firefox protection backend works in this fork.
+No Camoufox Python SDK, fpgen model or paid verification service is installed.
+The helper/installer do not automatically update this runtime. For reproducible
+local installation run install_camoufox_runtime.py --help and supply local assets.
+
+Evidence: 3/3 for recorded asset hashes and inspected versions; 2/3 for full
+upstream protection equivalence, which has not been runtime-verified.

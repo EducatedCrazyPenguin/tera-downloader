@@ -15,11 +15,21 @@ from app_state import default_data_dir, data_override
 from windows_runtime import application_mutex, downloads_directory
 from firefox_session import FirefoxProfile, SessionError, profiles
 from queue_manager import QueueManager, TERMINAL, REVIEW, HOLDS
-from terabox import DownloadError, TeraBox, open_firefox, parse_links
+from terabox import DownloadError, TeraBox, open_firefox, parse_links, validate_proxy
 from run_policy import validate_options
 from desktop_integration import Desktop, Notifications, available as desktop_available
 from app_version import VERSION
+from website_stream import is_website_source
+from website_dialog import WebsiteDialog, DIRECT_ROUTE, WEBSITE_ROUTE
 
+
+
+def queue_visible(jobs, search, state, active):
+    query=search.strip().casefold()
+    groups={'Pending':{'pending'},'Waiting':{'retry_wait'},'Needs attention':HOLDS}
+    return [j for j in jobs if j['status'] not in REVIEW | TERMINAL
+            and (state=='All' or state=='Active' and j['id']==active or j['status'] in groups.get(state,set()))
+            and query in (j['output_name'] or (j['video']['name'] if j['video'] else 'Share awaiting discovery')).casefold()]
 
 def size_text(value):
     for suffix in ('B', 'KB', 'MB', 'GB', 'TB'):
@@ -110,6 +120,11 @@ class TeraApp:
         header = ttk.Frame(frame)
         header.pack(fill='x', pady=(0, 10))
         ttk.Label(header, text='Tera', font=('Georgia', 22)).pack(side='left')
+        ttk.Label(header, text='Route for new links').pack(side='left', padx=(18, 6))
+        self.connection_route = tk.StringVar(value=DIRECT_ROUTE)
+        self.route_box = ttk.Combobox(header, textvariable=self.connection_route, values=[DIRECT_ROUTE, WEBSITE_ROUTE], state='readonly', width=25)
+        self.route_box.pack(side='left')
+        self.route_box.bind('<<ComboboxSelected>>', self.route_changed)
         self.settings_button = ttk.Button(header, text='Settings', command=lambda: self.notebook.select(self.settings_page))
         self.settings_button.pack(side='right')
         ttk.Button(header, text='Add links', command=lambda: self.notebook.select(self.queue_page)).pack(side='right', padx=8)
@@ -127,9 +142,33 @@ class TeraApp:
         self.settings_tabs.pack(fill='both', expand=True)
         general_page = self._settings_page('General')
         login_page = self._settings_page('Firefox login')
+        connection_page = self._settings_page('Connection')
+        self.connection_page = connection_page
+        browser_bar = ttk.Frame(connection_page)
+        browser_bar.pack(fill='x', pady=(0, 8))
+        ttk.Label(browser_bar, text='Website browser').pack(side='left', padx=(0, 8))
+        self.helper_browser = tk.StringVar(value='Firefox')
+        self.helper_browser_box = ttk.Combobox(browser_bar, textvariable=self.helper_browser, values=['Camoufox', 'Firefox', 'Edge'], state='readonly', width=10)
+        self.helper_browser_box.pack(side='left')
+        self.helper_browser_box.bind('<<ComboboxSelected>>', self.browser_changed)
+        self.helper_setup_button = ttk.Button(browser_bar, text='Set up browser…', command=self.setup_helper_browser)
+        self.helper_setup_button.pack(side='left', padx=8)
+        self.helper_hint = ttk.Label(browser_bar, text='Extensions and cookies remembered.')
+        self.helper_hint.pack(side='left')
         self.limits_page = self._settings_page('Run limits')
         help_page = self._settings_page('Help / About')
-        ttk.Label(queue_page, text='TeraBox share links').pack(anchor='w')
+        queue_header=ttk.Frame(queue_page)
+        queue_header.pack(fill='x')
+        ttk.Label(queue_header,text='Share links').pack(side='left')
+        self.queue_filter=tk.StringVar(value='All')
+        self.queue_search=tk.StringVar()
+        self.queue_filter_box=ttk.Combobox(queue_header,textvariable=self.queue_filter,values=['All','Pending','Active','Waiting','Needs attention'],state='readonly',width=15)
+        self.queue_filter_box.pack(side='right')
+        self.queue_search_entry=ttk.Entry(queue_header,textvariable=self.queue_search,width=14)
+        self.queue_search_entry.pack(side='right',padx=6)
+        ttk.Label(queue_header,text='Find in queue').pack(side='right')
+        self.queue_search.trace_add('write',lambda *args:self.render())
+        self.queue_filter.trace_add('write',lambda *args:self.render())
         links_row = ttk.Frame(queue_page)
         links_row.pack(fill='x', pady=(4, 8))
         links_row.columnconfigure(0, weight=1)
@@ -143,7 +182,7 @@ class TeraApp:
         self.add_button = ttk.Button(links_row, text='Choose videos…', command=self.add_links)
         self.add_button.grid(row=1, column=1, sticky='ew', pady=(4, 0))
         folder_row = ttk.Frame(queue_page)
-        folder_row.pack(fill='x', pady=(0, 12))
+        folder_row.pack(fill='x', pady=(0, 4))
         ttk.Label(folder_row, text='Save to').pack(side='left', padx=(0, 8))
         default_downloads = downloads_directory()
         self.destination = tk.StringVar(value=str(default_downloads) if default_downloads else '')
@@ -178,6 +217,17 @@ class TeraApp:
         self.disconnect_button.grid(row=2, column=0, sticky='w', pady=8)
         self.login_status = tk.StringVar(value='Opening saved queue…')
         ttk.Label(login_page, textvariable=self.login_status, wraplength=600).pack(anchor='w', pady=(4, 8))
+        ttk.Label(connection_page, text='Connection for Tera', font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0, 12))
+        ttk.Label(connection_page, text='Optional HTTP CONNECT proxy. Leave blank for a direct connection.', wraplength=600).pack(anchor='w')
+        ttk.Label(connection_page, text='Address: http://[user:password@]host:port').pack(anchor='w', pady=(12, 4))
+        self.proxy_url = tk.StringVar()
+        self.proxy_entry = ttk.Entry(connection_page, textvariable=self.proxy_url, show='*', width=65)
+        self.proxy_entry.pack(fill='x', pady=(0, 8))
+        self.proxy_save_button = ttk.Button(connection_page, text='Save connection', command=self.save_proxy)
+        self.proxy_save_button.pack(anchor='w')
+        self.connection_status = tk.StringVar(value='Opening saved connection…')
+        ttk.Label(connection_page, textvariable=self.connection_status, wraplength=600).pack(anchor='w', pady=8)
+        ttk.Label(connection_page, text='Bring a trusted proxy address; Tera does not provide one. Firefox login uses Firefox’s own connection. Proxy credentials are protected with your Windows account.', wraplength=600).pack(anchor='w', pady=8)
         self.per_share = tk.BooleanVar(value=False)
         ttk.Checkbutton(general_page, text='Use a separate folder for each share', variable=self.per_share).pack(anchor='w')
         favorite_row = ttk.Frame(general_page)
@@ -250,6 +300,7 @@ class TeraApp:
         edit = ttk.Frame(queue_page)
         self.up_button = ttk.Button(edit, text='Move up', command=lambda: self.move(-1))
         self.down_button = ttk.Button(edit, text='Move down', command=lambda: self.move(1))
+        self.next_button = ttk.Button(edit,text='Move next',command=lambda:self.send('move_next',job_ids=list(self.queue_tree.selection())))
         self.remove_button = ttk.Button(edit, text='Remove pending', command=self.remove_pending)
         for button in (self.up_button, self.down_button, self.remove_button):
             button.pack(side='left', padx=(0, 6))
@@ -342,6 +393,8 @@ class TeraApp:
         self.file_actions_menu.add_separator()
         self.file_actions_menu.add_command(label='Change folder…', command=lambda: self.change_destination(self.queue_tree))
         self.file_actions_menu.add_command(label='Rename…', command=lambda: self.rename_selected(self.queue_tree))
+        self.file_actions_menu.add_command(label='Move next',command=self.next_button.invoke)
+        self.next_menu_index=self.file_actions_menu.index('end')
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.configure_controls()
         self.poll_id = root.after(50, self.poll)
@@ -486,6 +539,16 @@ class TeraApp:
         except DownloadError as error:
             self.status.set(str(error).split('\n')[0])
 
+    def save_proxy(self):
+        if self.login_busy:
+            self.status.set('Wait for the login check before changing the connection.')
+            return
+        try:
+            value = validate_proxy(self.proxy_url.get())
+            self.send('preferences', changes={'proxy_url': value})
+        except DownloadError as error:
+            self.status.set(str(error))
+
     def check_login(self):
         if self.login_busy:
             return
@@ -493,12 +556,14 @@ class TeraApp:
         if not profile:
             self.login_status.set('Select your Firefox profile first.')
             return
+        proxy_url = (self.snapshot or {}).get('preferences', {}).get('proxy_url', '')
+        proxy = {'proxy_url': proxy_url} if proxy_url else {}
         self.login_busy = True
         self.login_cancel.clear()
         self.configure_controls()
         def work():
             try:
-                client = self.client_factory(self.login_cancel, lambda text: self.ui_events.put(('login', text)), profile)
+                client = self.client_factory(self.login_cancel, lambda text: self.ui_events.put(('login', text)), profile, **proxy)
                 client.verify_login()
                 self.ui_events.put(('login_verified', str(profile.path)))
                 text = 'Firefox login verified.'
@@ -524,6 +589,23 @@ class TeraApp:
             self.destination.set(chosen)
             self.send('preferences', changes={'last_destination': chosen})
 
+    def route_changed(self, event=None):
+        mode = 'website' if self.connection_route.get() == WEBSITE_ROUTE else 'direct'
+        self.send('preferences', changes={'connection_mode': mode})
+
+    def browser_changed(self, event=None):
+        self.send('preferences', changes={'website_browser':self.helper_browser.get().casefold()})
+
+    def setup_helper_browser(self):
+        if not self.initialized or self.closing:
+            return
+        browser = self.helper_browser.get().casefold()
+        if browser == 'camoufox':
+            self.status.set('Camoufox includes uBlock. Choose Firefox or Edge to manage extensions.')
+            return
+        WebsiteDialog(self.root, [], browser=browser,
+                      profile_dir=Path(self.manager.directory) / 'browser-profiles' / browser, setup=True)
+
     def add_links(self, quick=False):
         if self.pending_add is not None or not self.initialized or self.closing:
             return
@@ -532,7 +614,20 @@ class TeraApp:
             links = parse_links(text)
             if not self.destination.get().strip():
                 raise DownloadError('Choose a destination folder first.')
-            self.send('download_now' if quick else 'review', links=links, folder=self.destination.get().strip(), profile=self.profile_options.get(self.source.get()), per_share=self.per_share.get())
+            origins = {}
+            website = self.connection_route.get() == WEBSITE_ROUTE
+            if website and any(not is_website_source(link) for link in links):
+                dialog = WebsiteDialog(self.root, [link for link in links if not is_website_source(link)],
+                                       [link for link in links if is_website_source(link)],
+                                       browser=self.helper_browser.get().casefold(),
+                                       profile_dir=Path(self.manager.directory) / 'browser-profiles' / self.helper_browser.get().casefold())
+                if not dialog.result or self.closing:
+                    return
+                links = dialog.result
+                origins = getattr(dialog,'origins',{})
+            elif not website and any(is_website_source(link) for link in links):
+                raise DownloadError('Choose No VPN — Website above for a generated player link.')
+            self.send('download_now' if quick else 'review', links=links, origins=origins, folder=self.destination.get().strip(), profile=None if website else self.profile_options.get(self.source.get()), per_share=self.per_share.get())
             self.pending_add = text
             self.notebook.select(self.queue_page if quick else self.review_page)
             self.configure_controls()
@@ -620,14 +715,12 @@ class TeraApp:
             self.send('restart', job_id=selection[0])
 
     def move(self, direction):
-        identifier = self.selected_queue_job()
-        if identifier:
-            self.send('move', job_id=identifier, direction=direction)
+        identifiers=list(self.queue_tree.selection())
+        if identifiers:self.send('move',job_ids=identifiers,direction=direction)
 
     def remove_pending(self):
-        identifier = self.selected_queue_job()
-        if identifier:
-            self.send('remove', job_id=identifier)
+        identifiers=list(self.queue_tree.selection())
+        if identifiers:self.send('remove',job_ids=identifiers)
 
     def retry_failed(self):
         self.send('retry', job_ids=list(self.history_tree.selection()))
@@ -676,8 +769,15 @@ class TeraApp:
         for widget in (self.add_button, self.favorite_button, self.forget_favorite_button, self.browse_button, self.destination_entry):
             enabled(widget, available)
         enabled(self.add_button, available and self.pending_add is None)
+        for widget in (self.proxy_entry, self.proxy_save_button):
+            enabled(widget, available and not working and not discovering and not self.login_busy)
+        self.helper_browser_box.configure(state='readonly' if available else 'disabled')
+        camoufox = self.helper_browser.get().casefold() == 'camoufox'
+        enabled(self.helper_setup_button, available and not camoufox)
+        self.helper_hint.configure(text='uBlock included. Background helper.' if camoufox else 'Extensions and cookies remembered.')
         self.favorite_box.configure(state='readonly' if available else 'disabled')
         self.links_box.configure(state='normal' if available else 'disabled')
+        self.route_box.configure(state='readonly' if available and not self.login_busy else 'disabled')
         self.source_box.configure(state='readonly' if available and not working and not discovering and not self.login_busy else 'disabled')
         for widget in (self.login_button, self.check_button, self.disconnect_button):
             enabled(widget, available and not working and not discovering and not self.login_busy)
@@ -702,9 +802,11 @@ class TeraApp:
         enabled(self.review_saved_button, available and not discovering and any(j['status'] == 'unreviewed' for j in snapshot.get('jobs', [])))
         jobs = {j['id']: j for j in snapshot.get('jobs', [])}
         selected = jobs.get(self.selected_queue_job(), {})
-        for widget in (self.up_button, self.down_button, self.remove_button):
-            enabled(widget, available and selected.get('status') == 'pending')
-        enabled(self.remove_button, available and selected.get('status') in {'pending', 'attention'})
+        selection=[jobs[i] for i in self.queue_tree.selection() if i in jobs]
+        pending=bool(selection) and all(j['status']=='pending' and j['id']!=snapshot.get('active') for j in selection)
+        for widget in (self.up_button,self.down_button,self.next_button):enabled(widget,available and pending)
+        enabled(self.remove_button,available and bool(selection) and all(j['status'] in {'pending','attention'} and j['id']!=snapshot.get('active') for j in selection))
+        self.file_actions_menu.entryconfigure(self.next_menu_index,state='normal' if available and pending else 'disabled')
         enabled(self.restart_button, available and selected.get('id') != snapshot.get('active') and selected.get('status') in HOLDS | {'pending'} and not selected.get('source_blocked'))
         enabled(self.retry_queue_button, available and selected.get('status') == 'login' and not selected.get('source_blocked'))
         history_selection = [jobs[i] for i in self.history_tree.selection() if i in jobs]
@@ -726,7 +828,9 @@ class TeraApp:
         review = []
         reviewed = visible_jobs([j for j in jobs if j['status'] in REVIEW], self.review_search.get(), *SORTS[self.review_sort.get()])
         historical = visible_jobs([j for j in jobs if j['status'] in TERMINAL], self.history_search.get(), *SORTS[self.history_sort.get()])
-        queued = [j for j in jobs if j['status'] not in REVIEW | TERMINAL]
+        queued = queue_visible(jobs,self.queue_search.get(),self.queue_filter.get(),self.snapshot.get('active'))
+        filtered=bool(self.queue_search.get().strip()) or self.queue_filter.get()!='All'
+        self.empty_queue.configure(text='No queue items match. Clear Find in queue and choose All to show the queue.' if filtered else 'Your downloads will appear here. Paste a share link above, then Download now.')
         if queued:
             self.empty_queue.pack_forget()
         elif not self.empty_queue.winfo_manager():
@@ -735,7 +839,7 @@ class TeraApp:
             video = job['video']
             name = job['output_name'] or (video['name'] if video else 'Share awaiting discovery')
             if job['status'] in REVIEW:
-                review.append((job['id'], ('☑' if job['status'] == 'review' else '☐', name, size_text(video['size']) if video else 'Unknown',
+                review.append((job['id'], ('☑' if job['status'] == 'review' else '☐', name, size_text(video['size']) if video and video['size'] else 'Stream' if video else 'Unknown',
                                            job['folder'], job['error'] or job['status'].capitalize())))
             elif job['status'] in TERMINAL:
                 if self.history_filter.get() != 'All' and job['status'] != self.history_filter.get().lower():
@@ -750,8 +854,8 @@ class TeraApp:
                     status = 'Checking saved download'
                 if self.snapshot['paused'] and job['id'] == self.snapshot['active']:
                     status = 'Paused' if self.snapshot['pause_acknowledged'] else 'Pausing…'
-                source = job['profile']['name'] if job['profile'] else 'No login'
-                rows.append((job['id'], (name, status, size_text(video['size']) if video else 'Unknown', percent, source, job['folder'])))
+                source = 'Website stream' if is_website_source(job['link']) else job['profile']['name'] if job['profile'] else 'No login'
+                rows.append((job['id'], (name, status, size_text(video['size']) if video and video['size'] else 'Stream' if video else 'Unknown', percent, source, job['folder'])))
         for tree, items in ((self.review_tree, review), (self.queue_tree, rows), (self.history_tree, history)):
             if self._last_rows.get(tree) == items:
                 continue
@@ -766,16 +870,20 @@ class TeraApp:
                 else:
                     tree.insert('', index, iid=identifier, values=values)
             self._last_rows[tree] = items
+        self.configure_controls()
         chosen = [j for j in jobs if j['status'] == 'review' and j['video']]
         folders = {j['folder'] for j in chosen}
         free = self.snapshot['review_space'].get(next(iter(folders))) if len(folders) == 1 else None
-        self.review_summary.set(f"{len(chosen)} selected · {size_text(sum(j['video']['size'] for j in chosen))}" +
+        streams = sum(not j['video']['size'] for j in chosen)
+        self.review_summary.set(f"{len(chosen)} selected · {size_text(sum(j['video']['size'] for j in chosen))} known" +
+                                (f' · {streams} stream size(s) checked during download' if streams else '') +
                                 (f' · Free here: {size_text(free)}' if free is not None else '') +
                                 ' · Destinations and space are checked again before downloading.')
         total, received = self.snapshot['total'], self.snapshot['received']
         self.progress['value'] = min(100, received / total * 100) if total else 0
-        suffix = ' · more sizes pending discovery' if self.snapshot['unknown'] else ''
-        self.dashboard.set(f"{size_text(received)} / {size_text(total)} · {size_text(self.snapshot['speed'])}/s · ETA {duration_text(self.snapshot['eta'])}{suffix}")
+        suffix = ' · total size not yet known' if self.snapshot['unknown'] else ''
+        amount = size_text(received) if self.snapshot['unknown'] else f'{size_text(received)} / {size_text(total)}'
+        self.dashboard.set(f"{amount} · {size_text(self.snapshot['speed'])}/s · ETA {duration_text(self.snapshot['eta'])}{suffix}")
         self.favorite_box.configure(values=[f['name'] for f in self.snapshot['preferences'].get('favorites', [])])
         self.timezone_text.set('Windows local time: ' + self.snapshot['timezone'] + ' · Tera must stay running for schedules.')
         run, options = self.snapshot['run_state'], self.snapshot['run_options']
@@ -820,11 +928,15 @@ class TeraApp:
                 self.window_end.set(options['end'])
                 self.window_enabled.set(options['schedule_enabled'])
                 self.notify_enabled.set(preferences.get('notifications') is True)
+                self.proxy_url.set(preferences.get('proxy_url', ''))
+                self.connection_route.set(WEBSITE_ROUTE if preferences.get('connection_mode') == 'website' else DIRECT_ROUTE)
+                self.helper_browser.set(preferences.get('website_browser', 'firefox').capitalize())
                 self.initialized = True
             if self.desktop_supported and self.notify_enabled.get() and latest['preferences'].get('notifications') is True:
                 self.ensure_desktop()
             elif not self.notify_enabled.get():
                 self.pending_notifications.clear()
+            self.connection_status.set('Tera uses the saved proxy for its requests.' if latest['preferences'].get('proxy_url') else 'Direct connection. No app proxy configured.')
             self.status.set(transfer_message(latest))
             self.render()
         if error:
@@ -861,6 +973,10 @@ class TeraApp:
 
     def destroy(self):
         if not self.destroyed:
+            for window in self.root.winfo_children():
+                if isinstance(window, WebsiteDialog):
+                    window.cancel()
+                    return
             self.desktop.stop()
             if not self.desktop.stopped.is_set():
                 return

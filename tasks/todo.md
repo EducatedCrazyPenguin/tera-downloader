@@ -297,3 +297,481 @@ No automatic task below authorizes real Firefox cookie checks, live downloads, v
 - `smoke_desktop.py` passed as owned PID 18112: real tray registration/hide/restore, Pause/Resume, Cancel/reset, exact synthetic bytes, Save/exit, intercepted generic notification and rejected Windows registration with the window kept accessible. The actual `.pyw` path launched hidden parent PID 32692 and `pythonw` app PID 21608, used empty APPDATA/LOCALAPPDATA and an isolated state lock, then saved/exited on its owned WM_CLOSE. No global keystrokes, clipboard or unrelated window was used. These processes exited; no owned desktop smoke directory remains.
 - The unchanged withdrawn `smoke_terabox_gui.py` passed as owned PID 24568 with the optional packages absent from its interpreter, preserving A-D native queue/recovery/run-limit flows and real isolated CLI startup/exit. Native tray execution required permission outside the sandbox because its Windows message-filter call was denied. After diagnosed startup-ordering and fixture-selection failures, the final corrected run passed under the user's explicit one-run approval.
 - Source syntax parses with Python 3.10 grammar; runtime execution was Python 3.12.10. No existing Tera desktop shortcut or packaging pipeline was found, so there is no installed-version/shortcut claim. Real OS notification banners were intercepted, not delivered. Live TeraBox authentication/range/validator/large-file checks, Explorer restarts, sleep/resume and power loss remain unverified. See README for recovery/backup/rollback and desktop-extra setup.
+
+
+## App-only proxy — 28 October 2026
+
+- User authorized an app-only proxy and reported having no endpoint. Added an
+  optional HTTP CONNECT transport, masked connection settings and DPAPI storage.
+  Existing cookies stay local and travel only in certificate-validated HTTPS to
+  supported TeraBox origins. No public resolver or automatic free-proxy routing.
+- Public cookie-free HEAD requests from the unrestricted host timed out after
+  four seconds for www.terabox.app and www.1024tera.com; GitHub returned HTTP 200.
+  This establishes reachability failure in that check, not its precise cause.
+- Synthetic CONNECT transfer, offline suite, native settings save/restart,
+  packaging and installed checks: see the completion record below when run.
+- A real trusted proxy endpoint and TeraBox transfer remain pending.
+
+**Evidence: 2/3 — Source and synthetic routing checks; external provider and
+installed behavior remain unverified at this checkpoint.**
+
+
+### App-only proxy completion record — 28 October 2026
+
+- **Verified fact:** 161 offline tests passed on project Python 3.12.10. The six
+  new proxy tests cover input rejection, protected storage and failed-write
+  preservation, explicit CONNECT despite `no_proxy=*`, exact saved video bytes,
+  proxy credentials excluded from origin headers, TLS rejection of an untrusted
+  certificate, no direct fallback, domain restrictions, queue review/transfer
+  propagation, mid-transfer setting rejection and the login caller.
+- **Verified fact:** The isolated native smoke passed, including masked settings,
+  encrypted save, invalid-address rejection, restart, clear-to-direct and the
+  existing queue/recovery flows. The packaged executable repeated those flows
+  with an isolated profile and no development Python on PATH. No real browser
+  session, provider authentication or TeraBox media was used.
+- **Verified fact:** Built Tera-0.3.0-Setup.exe using the existing pinned build
+  environment. Quietly upgraded the inactive local installation from 0.2.0 to
+  0.3.0; the installed executable matched the package and saved settings/queue
+  checksums were unchanged. Existing Desktop shortcut target, working directory
+  and icon refer to the stable installed executable. Actual shortcut startup,
+  state ownership and clean save/exit passed with disposable inherited state,
+  empty browser-data locations and a restricted PATH. All test instances closed.
+- **Verified fact:** At the user's request, the public Geonode JSON list was
+  retrieved using a browser user-agent; 12 of the 20 returned entries had an HTTP
+  or HTTPS label. Two selected candidates both timed out after about three
+  seconds before CONNECT; no cookies, account details, private share URLs or
+  video bodies were sent. Testing stopped after these two failed candidates.
+- **Inference / proposal:** Automatic list retrieval is feasible, but those
+  results do not establish usable TeraBox transfers. If implemented later,
+  validate a bounded number of candidates and keep one endpoint for the full
+  transfer. Random per-request routing is not implemented. Geonode itself warns
+  of unknown operators, disconnections and no request-specific guarantee:
+  https://geonode.com/free-proxy-list
+- **Unknown / pending:** A working trusted external proxy, a real authenticated
+  TeraBox transfer without a system VPN, live-provider resume and large real
+  files. This release supplies configuration, not an endpoint or a verified
+  VPN-free downloading service.
+
+**Evidence: 3/3 for the named synthetic/native/installed checks; 2/3 for the
+VPN-free proposal because a working external proxy and real transfer have not
+been demonstrated.**
+
+
+## No-VPN investigation follow-up — 28 October 2026
+
+The user reports that 0.3.0's proxy setting did not solve the problem and that
+both Firefox and Tera fail with the VPN off. Investigated current GitHub relay
+implementations and then the user-named teradownloader.com. Its public pages
+are reachable, but its shipped flow requires a Cloudflare verification token;
+one bounded isolated headless Edge attempt did not reach the listing response.
+No media was downloaded, real Firefox credentials were not accessed, and no
+production source or installation was changed. The next needed evidence is
+the site's normally generated media URL so its actual delivery path can be
+checked privately. Do not add another unverified integration as a claimed fix.
+See research/no-vpn-options-2026-10-28.md for sources and limitations.
+
+**Evidence: 2/3 — Source architectures, service availability and isolated
+browser outcome checked; generated media delivery and VPN-free downloading
+remain unverified.**
+
+
+### Relay probe result — 28 October 2026
+
+The user supplied a generated player URL and then explicitly authorized a
+bounded playlist/segment check. The play.terafile.workers.dev route returned
+a finite HLS playlist (615 segments, declared 1:41:51) and a 53,392-byte first
+segment response (HTTP 206, MPEG-TS sync byte), with no redirect to TeraBox.
+No full video, Firefox cookie, signed-URL log or saved media was involved.
+This supports a website-assisted HLS path. Tera 0.3.0 still rejects playlist
+sources; no source change or new installation was performed. Full transfer,
+all remaining segments, audio/quality and HLS integration remain pending.
+See research/no-vpn-options-2026-10-28.md for exact scope and source references.
+
+**Evidence: 2/3 for the proposed solution; the named bounded observations are
+3/3. Full download and installed integration remain unverified.**
+
+
+## Delivery: explicit direct / website choice — 28 October 2026
+
+User requested a top-level VPN available / no-VPN choice. Implemented an
+explicit remembered route for new jobs. No-VPN original shares open a normal
+browser handoff; generated player/relay links use an isolated finite-HLS path
+without Firefox cookies or the direct-route proxy. The real playlist's 26
+discontinuities required local stream-copy assembly, so the existing personal
+FFmpeg build is copied, hash-pinned and bundled with its notices. No model,
+new dependency download, rendering or video encoding is needed. Website copies
+are .ts, totals are unknown until completion, and stream attempts restart from
+zero after exit. Existing direct-file checkpoint behavior is preserved.
+
+Focused transport, no-VPN handoff/cancel, encrypted queue restore and real
+loopback/local FFmpeg copy tests passed. The FFmpeg fixture carries synthetic
+data packets; it is not a claim of real movie/audio playback verification.
+Full regression/native/packaged/installed checks are recorded below when run.
+
+**Evidence: 2/3 — New route and synthetic transfer checked; complete provider
+delivery, real-video playback/quality and installed release remain pending.**
+
+
+### 0.4.0 completion checks — 28 October 2026
+
+- **Verified fact:** All 172 offline tests passed on Windows with Python 3.12.10.
+  The focused queue integration fetched synthetic parts over loopback HTTP,
+  assembled with the pinned local FFmpeg using stream copy and recovered the
+  exact expected data. This fixture does not verify real video/audio playback.
+- **Verified fact:** The real provider playlist was accepted by the new parser:
+  615 segments, 6,111 seconds and 26 discontinuities. This parser check read
+  metadata only (zero video bytes); the earlier authorized segment sample
+  remained bounded to 53,392 bytes and was discarded.
+- **Verified fact:** The first native check exposed two Tk variable cleanup
+  warnings. WebsiteDialog now releases its Tcl variables on the UI thread;
+  the subsequent isolated native smoke passed cleanly and detects unraisable
+  cleanup errors. The packaged executable repeated the synthetic route,
+  handoff and assembly flows with no development Python on PATH. Dependency
+  consistency and normal git diff whitespace checks passed.
+- **Verified fact:** Built Tera-0.4.0-Setup.exe, SHA256
+  fa7f1b81128be70649295963ef6dc0716129c62cdf23ad6aa3d7f700b82e6da0.
+  Quietly upgraded the inactive daily-use installation to 0.4.0; installed
+  executable and bundled FFmpeg hashes matched the build. Existing settings
+  and queue/WAL/SHM checksums were unchanged. Existing Desktop shortcut target,
+  working directory and icon refer to the stable installed executable.
+- **Verified fact:** Actual Desktop shortcut startup, isolated state ownership
+  and clean save/exit passed with synthetic inherited state, empty browser-data
+  locations and a restricted PATH. Test instance PID 10260 exited; no Tera.exe
+  process remained at the final read-only process check. No everyday browser,
+  Firefox cookie, full provider download or system/VPN setting was operated.
+- **Unknown / pending:** A complete real-provider video transfer, availability
+  of all segments, actual playback/audio/quality, expired-link recovery and
+  long pauses. The top choice routes new jobs; existing failed direct jobs
+  need the share re-added in Website mode. Normal website verification and
+  manual generated-player-link handoff are required.
+
+**Evidence: 3/3 for the named local/native/packaged/installed checks; 2/3 for
+complete VPN-free real-video downloading because full delivery and playback
+have not been demonstrated.**
+
+
+## Automatic website handoff — 29 October 2026
+
+User reports website downloads now work, but manual Firefox opening/copying is
+unacceptable. Added an automatic, isolated Microsoft Edge helper to the existing
+No-VPN modal. It navigates normally, clicks only the site's ordinary Watch Online
+buttons, captures validated player URLs without loading media, closes its owned
+browser and returns all sources to the queue. A static origin guard leaves
+Cloudflare frames untouched; no verification token, normal browser cookie or
+clipboard is inspected. Verification remains a human step when the site asks.
+
+Windows WinHTTP provides the loopback DevTools socket; a Windows job owns the
+helper process tree. No runtime dependency/browser download was added. Startup,
+page load, commands and per-share work are bounded. Errors do not fall back to
+TeraBox directly or retry automatically. Cancel/app exit wait for cleanup;
+manual browser/player-link fallback is retained. Profiles are disposable and
+removed on normal exit; forced loss or a reported cleanup failure can leave an
+owned tera-browser-* folder in Windows Temp.
+
+Verification so far: 178 offline tests passed before the final capture-limit
+check, plus real headless Edge against a two-row local website, exact link
+capture, no media navigation, bounded empty-list failure and process/profile
+cleanup. The native Tk flow automatically queued a returned source without a
+paste, assembled synthetic packets and verified app-close-during-handoff
+cancellation. The existing tray mock needed its root children set to an empty
+list; its behavior/checks were preserved. Final release gates are recorded below.
+
+Live evidence: first native Edge app-mode startup produced no usable page;
+changed to a small regular Edge window. One short live capture then returned no
+player. After reporting/stopping retries, a focused diagnostic loaded the
+provider (HTTP 200, injected handoff active) but no Watch Online button appeared
+within 25 seconds. The exact cause (verification, service response or changed
+site state) is unknown. Do not claim current unattended provider capture passed.
+No real media download was performed. User confirmed the same authorized share
+still works manually; no private share/player URL was saved in these notes.
+
+**Evidence: 2/3 — Local browser/native automation works; unattended current
+provider capture and a full real-video transfer remain unverified.**
+
+
+### 0.5.0 release checks and installation — 29 October 2026
+
+- **Verified fact:** Final regression suite: 179 offline tests passed on Windows,
+  Python 3.12.10. The added navigation regression rejects a captured media request
+  before fetching it, releases the pending ordinary button and caps result count.
+  Existing dependency consistency and git whitespace checks passed.
+- **Verified fact:** Native Tk checks passed automatic worker-to-modal-to-queue
+  handoff, exact synthetic output, encrypted persistence and closing Tera during
+  an active handoff. Real Edge 156.0.4314.50 ran against a local two-row website:
+  both ordinary buttons clicked exactly once, both player URLs captured, no media
+  navigation, cancellation before navigation, empty-list timeout and owned process/
+  temporary-profile cleanup. Injected JavaScript had no runtime exceptions.
+- **Verified fact:** Final packaged app repeated those synthetic flows without
+  development Python on PATH. An earlier packaged run exposed a local HTTP idle-
+  socket reset when closing the owned browser. The fixture now handles only
+  ConnectionResetError/BrokenPipeError from that disconnect; all other checks
+  remain intact. The final packaged log has no traceback, ignored exception or
+  callback/self-test failure.
+- **Verified fact:** Built Tera-0.5.0-Setup.exe, final SHA256
+  be70851b6d7aefbce986562bbccf9d546e6bf48edebcc78f462db306c0196761.
+  Quietly installed 0.5.0 over the inactive 0.4.0 daily-use installation. Installed
+  executable matches the checked package; saved settings and queue/WAL/SHM
+  checksums were unchanged. Existing shortcut target, working directory and icon
+  point to the stable installed executable. Actual Desktop shortcut PID 21728
+  passed isolated state ownership, startup, clean save/exit without a development
+  PATH. It did not exercise a real provider download.
+- **Unknown / pending:** Fully unattended live provider link generation. A bounded
+  native Edge diagnostic loaded the actual site but received no Watch Online
+  buttons/player URL. The user reports the same share works manually. No exact
+  root cause was established, and no verification was solved/replayed or normal
+  Firefox session accessed. User must complete verification if shown, or use the
+  manual fallback if site resolution fails. No full real video was downloaded;
+  actual playback/audio/quality and expiring-source behavior remain untested.
+
+**Evidence: 3/3 for the named local/browser/native/packaged/shortcut observations;
+2/3 for the automated live solution because current unattended provider capture
+and full delivery have not been demonstrated.**
+
+
+## Firefox/Edge choice and requested uBlock — 29 October 2026
+
+User reports ordinary Firefox succeeds but Edge/helper fails, possibly because
+of cookies/uBlock. Implemented a remembered Website browser selector (Firefox
+by default / Edge), separate Tera-owned persistent profiles, and Set up browser
+for managing extensions. Everyday profiles are not copied or automated. Profiles
+retain cookies/cache/extensions between runs; Edge no longer disables extensions.
+Firefox uses supported BiDi with the existing WinHTTP transport, no driver or
+runtime dependency download. Marker/lock checks reject an existing unmarked
+profile and concurrent helper use. Three minutes per share / one minute initial
+load replace the short waits. Job-tree lifetime handles Firefox's Windows
+launcher handoff, and graceful owned-browser shutdown permits profile writes.
+
+At the user's explicit request, downloaded official Mozilla uBlock Origin 1.75.0,
+4,650,100 bytes, verified ID uBlock0@raymondhill.net, manifest version, Mozilla
+signature material and AMO SHA256
+5b74415860456370644bd80f16125e865b0e6c356bb5dfcfb84069967eaa5287.
+Installed permanently in LOCALAPPDATA/Tera/browser-profiles/firefox with signature
+checks intact; BiDi extension metadata confirmed active/non-temporary before and
+after a real Firefox restart. The XPI is not bundled in Tera's installer. No
+extension/cookie data from everyday Firefox was copied. The requested extension
+has normal all-sites/webRequest/privacy permissions within this separate profile.
+Sources: https://addons.mozilla.org/en-US/firefox/addon/ublock-origin/
+and https://addons.mozilla.org/api/v5/addons/addon/ublock-origin/.
+
+Verification: 187 offline tests pass; native selector/setup worker, automatic
+modal capture/queue, saved choice and cancellation pass. Real headless Edge
+156.0.4314.50 and Firefox 159.0 click each of two synthetic rows once, capture
+exact sources, reject media, stop on an empty listing, cancel before navigation,
+clean up owned processes and retain a synthetic first-party cookie after restart.
+Mapped native controls passed all 16 size/scaling/tab combinations. Dependency
+consistency and whitespace checks pass. Packaged/installed gates follow below.
+
+Live evidence remains limited: plain Firefox and Firefox with active uBlock did
+not yield a player in short probes. A later explicitly requested five-minute
+inspection window emitted Cloudflare console code 600010; user screenshots
+confirm Verification failed and a blank page overlay. Numeric console extraction
+also observed unrelated six-digit text, so only the documented 600010 observation
+is used diagnostically. Cloudflare documents 600* as generic challenge failure /
+bot behavior detected; the exact cause or detection signal is unknown. Firefox
+now reports strictly formatted Turnstile error codes in Tera while keeping the
+bounded window available for normal user verification. No challenge token was
+fabricated, captured or replayed; no full media was downloaded.
+https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
+
+At the user's request, inspected Camoufox and FlareSolverr primary project pages.
+Their existence does not verify service compatibility here. FlareSolverr's README
+warns its CAPTCHA solvers do not currently work; no spoofing tool was installed.
+Cloudflare also documents potential extension interference, so uBlock alone is
+not established as a fix. The normal-Firefox manual route remains user-reported
+working behavior; current automated provider resolution is not verified.
+https://github.com/daijro/camoufox
+https://github.com/FlareSolverr/FlareSolverr
+
+**Evidence: 3/3 for the named local/native browser checks and uBlock activation;
+2/3 for the live automation proposal because Cloudflare verification failed and
+complete provider delivery has not been demonstrated.**
+
+
+### 0.6.0 completion gates and remaining provider failure — 29 October 2026
+
+- Final offline suite: 187 tests passed. Native selector/setup, saved choice,
+  queue/assembly and cancel checks passed. Real headless Edge and Firefox each
+  retained a synthetic first-party cookie across a real browser restart.
+- The first packaged attempt caught a finish-current fixture race. It now waits
+  for an active transfer and asserts exactly one additional completion relative
+  to the count at that boundary; final byte-exact/all-file assertions remain.
+- A later packaged attempt caught an actual small-window layout regression.
+  Focused measurement reproduced it at scale 2 / 880x680: tree height 132 versus
+  third-row bottom 168 (36 pixels short). Moved browser choice/setup into existing
+  Settings → Connection instead of consuming another main-window row. The same
+  three-row requirement and all 16 size/scaling/tab checks passed after the fix;
+  selector/setup visibility is checked within the Connection canvas viewport.
+  No minimum window increase, removed row assertion or broad suppression was used.
+- Final packaged self-test passed with no traceback, ignored exception, callback
+  failure or clipping diagnostic. It ran real headless Edge/Firefox and local
+  fixtures without development Python on PATH. No provider media was downloaded.
+- Built final Tera-0.6.0-Setup.exe, SHA256
+  137d94b3d864753e4c957ad5ecc7ba993f09d08599e944661c6760f6fb0c5203.
+  Quietly upgraded the inactive daily-use installation from 0.5.0 to 0.6.0.
+  Installed executable matches the checked build. Queue/settings/WAL/SHM and
+  the requested uBlock XPI fingerprints were unchanged by installation.
+- Verified installed version 0.6.0, existing Desktop shortcut target/working
+  directory/icon, and actual shortcut startup/state ownership/save/exit using
+  disposable state and restricted PATH (owned PID 15476). The requested uBlock
+  XPI remains 4,650,100 bytes in Tera's Firefox profile. The earlier native BiDi
+  check confirmed active, permanent installation after restart.
+- The user-requested five-minute Firefox inspection window closed normally;
+  everyday Firefox was not copied or operated. Screenshot and console evidence
+  establish verification failure, not its exact fingerprint/extension cause.
+  Cloudflare's documented 600* category reports generic challenge/bot behavior
+  failure. No spoofing tool was installed. Full real-provider capture/download,
+  playback/audio/quality and expiring-source behavior remain unverified.
+
+**Evidence: 3/3 for the stated named runtime/install observations; 2/3 overall
+because current unattended Cloudflare/provider resolution remains unresolved.**
+
+
+### Camoufox automatic website route 0.7.0 — 29 October 2026
+
+- [x] Inspect Camoufox/Pydoll primary sources and native launch behavior. The
+  current Camoufox SDK can load fpgen; use the native browser directly through
+  existing Playwright Core, without installing/importing the SDK or any model.
+- [x] Verify official native 158.0-beta.40 ZIP SHA256
+  2d3e33207c2d5853e817e8317f0e33124ffb7054bd5102c8b84546e3d15a6447.
+  Install the optional, versioned runtime under LOCALAPPDATA/Tera/browser-runtime,
+  with Node 24.22.1, Playwright Core 1.62.1 and official uBlock 1.75.0. Record
+  local extracted file hashes and retain dependency notices. The small app
+  installer does not contain or automatically download this browser runtime.
+- [x] Add remembered Camoufox browser selection and a background private-pipe
+  worker. Validate every returned source again in Python. Block media/player
+  loads and unrelated top-level navigation, keep shared URLs off command lines
+  and logs, and own the Node/browser tree with the existing Windows job wrapper.
+- [x] Keep Firefox/Edge choice and extension setup. Camoufox native settings-page
+  navigation did not pass headless checks; its new setup button is explicitly
+  unavailable, with uBlock included automatically. No existing browser profile
+  was copied, attached or modified by this work.
+- [x] Resolve live user-provided share using native Camoufox and the final Tera
+  controller. Repeated final checks returned one supported player; WebsiteStream
+  accepted one finite playlist with 615 segments / 6111 seconds. No real media
+  segment or full video was downloaded by these checks. Signed URLs and API
+  bodies stayed in memory. Exact future Cloudflare acceptance is unknown.
+- [x] Fix real multi-file bugs found by focused runtime checks: changing a row's
+  button label must not skip another row; popup capture must precede cleanup;
+  popup navigation has no guaranteed frame yet; resolve rows sequentially to
+  preserve their order. The local fixture changes the first label and asserts
+  both exact player addresses in order plus exactly two ordinary clicks.
+- [x] Strict headless local fixtures passed for Edge, Firefox and Camoufox,
+  including media blocking, cancellation, owned cleanup and first-party cookie
+  persistence after a real restart. A deep Camoufox/uBlock test profile failed
+  ordinary Windows cleanup (winerror 145); checked extended-path cleanup removed
+  the exact owned fixture, and shorter OS-temp profiles passed strict cleanup.
+- [x] Final offline suite: 196 tests passed. Native self-test
+  release-checks/source-0.7-final passed, including saved Camoufox selection,
+  synthetic modal/worker/queue/assembly, exact bytes, cancel/app exit and all 16
+  mapped layout checks. Packaged PID 30320 passed the same checks with real
+  headless browsers and no development Python on PATH; no runtime was skipped.
+- [x] Build final Tera-0.7.0-Setup.exe SHA256
+  2d55a869659ae160fdb2cfa2439686c784f4888df64769150d94fba5b6349c59.
+  Quiet upgrade PID 29172 preserved fingerprints of queue/settings/WAL/SHM and
+  the existing Firefox uBlock XPI. Installed executable and worker equal the
+  checked build/source. Installed file/product versions both read 0.7.0.
+- [x] Back up previous settings as settings.before-camoufox-0.7.0.json in Tera's
+  state directory, then select connection_mode=website and website_browser=camoufox.
+  Verify queue rows unchanged. Existing shortcut target/working directory/icon
+  match the installed app. Actual shortcut PID 28772 passed isolated startup,
+  Camoufox-preference preservation, state ownership and clean save/exit without
+  a development server or Python PATH. The test instance was closed.
+
+Remaining verification limits: no full real-provider transfer, playback, audio,
+quality, long-run performance or expiry behavior was tested. The provider route
+was live-tested in the source controller; packaged/installed checks used the
+specified synthetic flows. Protection prefs were enabled explicitly, but full
+stock-Firefox protection backend equivalence was not established. Native BiDi
+startup did not work in two probes, so the verified Juggler/Playwright route is
+used. No claim is made about the exact earlier Cloudflare detection signal.
+
+**Evidence: 3/3 for the named resolution/playlist, local/native/packaged/install
+observations; 2/3 for complete real-video delivery because no full transfer or
+playback was performed.**
+
+
+### Reliable website downloads 0.8.0 — 29 October 2026
+
+- Implemented website-specific durable checkpoints beside the destination. Each
+  complete validated TS segment is flushed/fsynced before an acknowledged queue
+  checkpoint; incomplete segments are discarded. Records bind job/workspace
+  ownership and store sizes/hashes, not signed playlist/segment URLs.
+- Resume verifies local hashes and exact canonical playlist identity (ordered
+  absolute segment URLs, durations and tags including sequence/discontinuities).
+  Changed or missing data holds for explicit restart; existing targets are never
+  overwritten. Ready-file ownership/hash records reconcile crashes after rename.
+- Exit/recoverable errors retain completed segments; Cancel/Skip/Restart remove
+  only the owned workspace. Orderly website shutdown does not consume the failed
+  attempt budget. Original-file checkpoint behavior is retained.
+- Resolver/dialog/queue now retain provenance for unambiguous shares. StateStore
+  protects original shares inside the existing DPAPI source blob. The second
+  attempt can refresh once with Camoufox; ambiguous results and missing provenance
+  hold for user action. Refreshed playlists must match before saved parts are used.
+- Reused the two-attempt policy, honoured Retry-After, clamped unknown-size space
+  reservations, retained new-byte-only accounting and stage/segment/byte messages.
+  Observed Turnstile verification failures have a distinct fixed error message.
+- State version 2 migration uses SQLite backup API and settings backup before the
+  version change. Actual daily migration preserved queue rows and settings and
+  verified queue.before-v2.sqlite plus settings.before-v2.json. Older versions
+  reject version-2 state; rollback requires restoring both pre-migration backups.
+- Final offline suite: 204 passing tests. Focused tests exercised real queue
+  shutdown/restore with no first-segment re-request, exact recovered output,
+  new-byte accounting, hash/truncation failures, changed manifests, publication
+  crash reconciliation, disk-full preservation, bounded retry, protected
+  provenance/migration and one refresh versus ambiguous-source hold.
+- Source native gate release-checks/source-0.8-final passed. Final packaged
+  PID 3028 passed isolated native queue/assembly/layout/startup checks and real
+  headless Edge/Firefox/Camoufox fixtures without development Python PATH.
+- Final installer SHA256:
+  8119f86ee79698320ed5e7f1afdeb117af1b88fcf82a8826961792c3b661b543.
+  Quiet upgrade PID 26820 preserved queue/settings and existing Firefox uBlock
+  fingerprints. Installed executable and browser worker match checked artifacts;
+  file/product versions are 0.8.0. Existing shortcut target/directory/icon verified;
+  actual-shortcut PID 24128 passed isolated startup, ownership and clean exit.
+
+No full provider download/playback was run; an explicitly approved small sample
+is still needed for that gate. Refresh tests use synthetic sources; live refreshed
+playlist stability is unverified. Existing player-only jobs cannot gain original
+share provenance retroactively. MP4 output, parallelism and runtime repair/update
+remain deferred. No new dependency or browser/model download was introduced.
+
+**Evidence: 3/3 for the named synthetic/native/package/install observations;
+2/3 overall because full live-provider recovery and playback remain unverified.**
+
+
+### Queue ordering and bulk controls 0.9.0 — 30 October 2026
+
+- User selected ordering/bulk controls and view-only filters as the queue focus.
+  Added multi-selection Move up/down, Move next, and Remove pending through the
+  existing File actions menu. Relative selection order is preserved; Move next
+  precedes pending jobs and waiting retries without stopping the active worker.
+- The coordinator resolves and validates every selected ID before mutation.
+  Mixed active/ineligible or missing-ID selections are rejected before changes.
+  Removal retains existing owned-partial cleanup and completed-file protections.
+- Added case-insensitive filename search and All/Pending/Active/Waiting/Needs
+  attention filters. Hidden rows lose selection and actions immediately disable.
+  Filters affect only the view, not saved order or Start queue membership. Filter
+  state resets on reopening; actual ordering/removal persists. No schema change.
+- Reused existing header space, with compact destination-row padding. Native and
+  packaged checks preserve all three filename rows and verify filter widgets in
+  all 16 tab/size/scaling combinations; no window minimum or gate was weakened.
+- Final offline suite: 210 passing tests. Focused cases cover stable group moves,
+  prioritisation ahead of retry waits, mixed/invalid selection rejection, selected
+  cleanup only, filter non-mutation and real coordinator save/restart ordering.
+- Source native gate release-checks/source-0.9-final passed. Packaged PID 25544
+  passed native queue/filter/layout/assembly/startup checks and isolated headless
+  Edge/Firefox/Camoufox fixtures without development Python PATH.
+- Final installer SHA256:
+  b5ea8d0c51aba02727d152031b6c200f19e5d5a0851f8b9baa8135b5e250508c.
+  Quiet upgrade PID 29360 preserved queue/settings and Firefox uBlock file
+  fingerprints. Installed executable equals the tested build; file/product
+  versions are 0.9.0. Existing shortcut target, working directory and icon were
+  verified; actual-shortcut PID 31584 passed isolated startup/state ownership and
+  clean save/exit. Test instance closed; no everyday browser was operated.
+
+No parallel downloading, per-share grouping, provider changes or new dependencies
+were added. Checks used synthetic downloads; complete real-provider transfer and
+playback remain separately unverified.
+
+**Evidence: 3/3 for the stated queue tests and native/package/install observations;
+this does not establish full live-provider transfer reliability.**

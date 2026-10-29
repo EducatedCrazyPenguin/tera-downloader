@@ -86,7 +86,7 @@ class StateStore:
                 raise StateError('Tera is already using this data folder. Open the existing instance.') from None
             self.db = sqlite3.connect(self.directory / 'queue.sqlite', timeout=2)
             version = self.db.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise StateError('This queue belongs to a newer Tera version. Its data was left unchanged.')
             if version == 0:
                 if self.db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchone():
@@ -94,6 +94,14 @@ class StateStore:
                 with self.db:
                     self.db.execute('CREATE TABLE jobs (id TEXT PRIMARY KEY, position INTEGER NOT NULL, source BLOB NOT NULL, payload TEXT NOT NULL)')
                     self.db.execute('PRAGMA user_version = 1')
+            if version == 1:
+                backup_path = self.directory / 'queue.before-v2.sqlite'
+                if backup_path.exists():raise StateError('Migration backup already exists. Preserve it and resolve the incomplete migration before retrying.')
+                with closing(sqlite3.connect(backup_path)) as backup:self.db.backup(backup)
+                settings = self.directory / 'settings.json'
+                if settings.exists():
+                    with (self.directory / 'settings.before-v2.json').open('xb') as output:output.write(settings.read_bytes())
+            with self.db:self.db.execute('PRAGMA user_version = 2')
             if not (self.directory / 'settings.json').exists():
                 preferences = {}
                 if legacy_settings and Path(legacy_settings).exists():
@@ -125,8 +133,13 @@ class StateStore:
                 if not isinstance(record, dict):
                     raise ValueError('Invalid job')
                 link = unprotect(bytes(source)).decode('utf-8')
+                private=link
+                if link.startswith('{'):
+                    protected=json.loads(link)
+                    record['origin_share']=protected['origin_share']
+                    link=protected['link']
                 record.update(id=identifier, link=link)
-                self._sources[identifier] = (link, bytes(source))
+                self._sources[identifier] = (private, bytes(source))
                 rows[identifier] = (identifier, position, bytes(source), payload)
                 result.append(record)
             self._rows = rows
@@ -142,9 +155,11 @@ class StateStore:
         for position, job in enumerate(jobs):
             record = dict(job)
             identifier, link = record.pop('id'), record.pop('link')
+            origin=record.pop('origin_share','')
+            private=json.dumps({'link':link,'origin_share':origin}) if origin else link
             cached = self._sources.get(identifier)
-            encrypted = cached[1] if cached and cached[0] == link else protect(link.encode('utf-8'))
-            sources[identifier] = (link, encrypted)
+            encrypted = cached[1] if cached and cached[0] == private else protect(private.encode('utf-8'))
+            sources[identifier] = (private, encrypted)
             rows.append((identifier, position, encrypted, json.dumps(record, ensure_ascii=False)))
         try:
             current = {row[0]: row for row in rows}
@@ -162,6 +177,10 @@ class StateStore:
             result = json.loads((self.directory / 'settings.json').read_text(encoding='utf-8'))
             if not isinstance(result, dict):
                 raise ValueError('Invalid preferences')
+            if 'connection_mode' in result and result['connection_mode'] not in ('direct', 'website'):
+                raise ValueError('Invalid connection mode')
+            if 'website_browser' in result and result['website_browser'] not in ('firefox', 'edge', 'camoufox'):
+                raise ValueError('Invalid website browser')
             if 'notifications' in result and not isinstance(result['notifications'], bool):
                 raise ValueError('Invalid notifications preference')
             if 'firefox_profile' in result and result['firefox_profile'] is not None and not isinstance(result['firefox_profile'], str):
@@ -172,6 +191,11 @@ class StateStore:
                     isinstance(item, dict) and set(item) == {'name', 'path'}
                     and all(isinstance(value, str) and value.strip() for value in item.values()) for item in result['favorites'])):
                 raise ValueError('Invalid favorites')
+            if 'proxy_url' in result:
+                saved_proxy = result['proxy_url']
+                if not isinstance(saved_proxy, dict) or set(saved_proxy) != {'dpapi'} or not isinstance(saved_proxy['dpapi'], str):
+                    raise ValueError('Invalid protected proxy preference')
+                result['proxy_url'] = unprotect(bytes.fromhex(saved_proxy['dpapi'])).decode('utf-8')
             return result
         except (OSError, ValueError):
             raise StateError('Saved preferences could not be read. The original file was left unchanged.') from None
@@ -182,8 +206,13 @@ class StateStore:
         try:
             preferences = self.load_preferences() if path.exists() else {}
             preferences.update(changes)
+            serialized = dict(preferences)
+            if serialized.get('proxy_url'):
+                serialized['proxy_url'] = {'dpapi': protect(serialized['proxy_url'].encode('utf-8')).hex()}
+            else:
+                serialized.pop('proxy_url', None)
             with temporary.open('x', encoding='utf-8') as output:
-                json.dump(preferences, output, ensure_ascii=False, indent=2)
+                json.dump(serialized, output, ensure_ascii=False, indent=2)
                 output.flush()
                 os.fsync(output.fileno())
             try:

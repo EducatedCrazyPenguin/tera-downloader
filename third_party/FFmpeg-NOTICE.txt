@@ -1,0 +1,12 @@
+FFmpeg is included as a separate unmodified local command-line executable.
+Observed version: N-126305-g0bffa4a84d-20260827 (2026-08-27).
+License reported by this executable: GNU GPL version 3 or later.
+The complete license is in FFmpeg-GPLv3.txt; the binary hash is in FFmpeg-SHA256.txt.
+Reused from the existing personal YouTube downloader tools; no new download.
+That downloader records its build provider as:
+https://github.com/yt-dlp/FFmpeg-Builds
+FFmpeg source revision:
+https://github.com/FFmpeg/FFmpeg/tree/0bffa4a84d
+Build and dependency recipes:
+https://github.com/yt-dlp/FFmpeg-Builds
+Tera invokes only local-file stream copy, with encoding and network inputs disabled.

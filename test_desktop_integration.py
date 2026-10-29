@@ -63,6 +63,7 @@ class DesktopTests(unittest.TestCase):
         app.closing, app.close_error, app.destroyed = True, False, False
         app.login_thread = None
         app.root, app.status, app.configure_controls = Mock(), Mock(), Mock()
+        app.root.winfo_children.return_value = []
         app.poll()
         self.assertFalse(app.destroyed)
         app.status.set.assert_not_called()

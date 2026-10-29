@@ -14,6 +14,10 @@ class StorageError(DownloadError):
 
 
 def input_key(link):
+    from website_stream import is_website_source, parse_source
+    if is_website_source(link):
+        source, _ = parse_source(link)
+        return hashlib.sha256(source.encode()).hexdigest()
     share_id(link)
     parsed = urlsplit(link.strip())
     normalized = urlunsplit(('https', parsed.hostname.lower(), parsed.path,
@@ -27,7 +31,7 @@ def share_key(link, metadata):
 
 
 def share_folder(base, link, identity):
-    share_id(link)
+    input_key(link)
     suffix = hashlib.sha256(identity.encode()).hexdigest()[:12]
     return Path(base).resolve() / safe_name(f'Share-{suffix}')
 
