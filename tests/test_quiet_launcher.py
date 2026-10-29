@@ -8,6 +8,16 @@ import quiet_launcher
 
 
 class LauncherTests(unittest.TestCase):
+    def test_source_gui_keeps_legacy_settings_at_repository_root(self):
+        from contextlib import nullcontext
+        import tera_gui
+        with patch('tera_gui.application_mutex',return_value=nullcontext()), patch('tera_gui.tk.Tk'), \
+             patch('tera_gui.data_override',return_value=None), patch('tera_gui.default_data_dir',return_value=Path('synthetic-state')), \
+             patch('tera_gui.QueueManager') as manager, patch('tera_gui.TeraApp'):
+            tera_gui.gui()
+        self.assertEqual(manager.call_args.kwargs['legacy_settings'],Path(__file__).resolve().parents[1]/'.tera-settings.json')
+
+
     def test_self_test_failure_records_location_without_exception_values(self):
         with tempfile.TemporaryDirectory() as folder, patch('smoke_terabox_gui.main', side_effect=RuntimeError('private-url-token')):
             self.assertEqual(quiet_launcher.main(['--data-dir', folder, '--self-test', 'app']), 1)

@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import math
 import os
+import sys
 import queue
 import threading
 import time
@@ -1000,7 +1001,8 @@ def gui(data_dir=None):
     data_dir = data_override(data_dir)
     with application_mutex():
         root = tk.Tk()
-        legacy = Path(__file__).parent / '.tera-settings.json' if data_dir is None else None
+        legacy_root = Path(__file__).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
+        legacy = legacy_root / '.tera-settings.json' if data_dir is None else None
         manager = QueueManager(data_dir or default_data_dir(), legacy_settings=legacy)
         TeraApp(root, manager)
         root.mainloop()

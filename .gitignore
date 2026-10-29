@@ -17,3 +17,9 @@ cookies*
 build/
 dist/
 release-checks/
+
+# Disposable native test profiles and Python tool caches.
+tests/tera-smoke-*/
+tests/tera-desktop-*/
+.pytest_cache/
+*.egg-info/

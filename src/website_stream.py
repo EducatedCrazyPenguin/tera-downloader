@@ -239,7 +239,7 @@ class WebsiteStream(TeraBox):
 
 
 def ffmpeg_path():
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
     executable = root / ('tools' if getattr(sys, 'frozen', False) else '.tools') / 'stream-ffmpeg.exe'
     if not executable.is_file():
         raise DownloadError('The bundled stream assembly tool is missing. Reinstall Tera.')

@@ -7,6 +7,11 @@ import shutil
 import tempfile
 import zipfile
 
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'src'))
+
 from camoufox_helper import RUNTIME_MARKER, runtime_directory
 
 BROWSER_SHA = '2d3e33207c2d5853e817e8317f0e33124ffb7054bd5102c8b84546e3d15a6447'

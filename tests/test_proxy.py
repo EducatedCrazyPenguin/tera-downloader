@@ -60,7 +60,7 @@ class ProxyTests(unittest.TestCase):
     def test_https_download_uses_connect_even_when_no_proxy_is_star(self):
         fixture = self
         connects, requests, errors = [], [], []
-        cert = Path(__file__).with_name('testdata') / 'proxy-localhost.pem'
+        cert = Path(__file__).with_name('fixtures') / 'proxy-localhost.pem'
         tls_server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls_server.load_cert_chain(cert)
 

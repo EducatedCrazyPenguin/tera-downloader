@@ -775,3 +775,31 @@ playback remain separately unverified.
 
 **Evidence: 3/3 for the stated queue tests and native/package/install observations;
 this does not establish full live-provider transfer reliability.**
+
+
+### Repository organisation — 30 October 2026
+
+- Group application modules/browser worker under src/, tests and synthetic
+  fixtures under tests/, developer entrypoints under scripts/, build definitions
+  under packaging/ and pinned dependencies under requirements/. Move design,
+  product and development history under docs/. Retain root launchers/changelog.
+- Replace the long landing README with a compact overview and folder map; retain
+  the complete manual in docs/usage.md. Validate all relative Markdown links and
+  update current test/build/CLI commands. Historical records remain historical.
+- Root Start Tera.pyw bootstraps src/; quiet launcher still finds the root venv.
+  Explicit source self-tests locate tests/. Preserve root legacy source settings;
+  a new regression demonstrated and corrected the accidental src/ legacy path.
+  Preserve frozen legacy lookup. Update FFmpeg, crash/TLS fixture and smoke paths.
+- scripts/test.py is the canonical unittest discovery entrypoint. Final suite:
+  211 tests passed. Root launcher/help, moved runtime installer/help and source
+  CLI/help passed. Isolated source native startup/queue/browser/layout gate
+  release-checks/source-organized passed. Packaged layout gate PID 26524 passed
+  before the final source-only legacy-lookup fix; final build also succeeded.
+  That lookup fix is covered by its focused mocked GUI/state-boundary regression.
+- PyInstaller and Inno Setup build from relocated configuration. No dependencies,
+  transfer behaviour, state schema, version or daily-use installation were changed.
+  No real provider transfer was run. Local research/profiles/artifacts remain
+  ignored; local AGENTS.md stays untracked and its test command was updated.
+
+Evidence: 3/3 for the stated file-layout, unit, source-runtime and build checks;
+no new installed-app release or live-provider verification is claimed.

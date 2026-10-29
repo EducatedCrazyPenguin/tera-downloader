@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-python terabox.py
+python src\terabox.py
 if errorlevel 1 pause

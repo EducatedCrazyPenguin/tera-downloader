@@ -5,7 +5,12 @@
   #define ProductId "Tera.Downloader.Personal"
 #endif
 
+#ifndef RepoRoot
+  #error RepoRoot must be supplied by build_windows.py
+#endif
+
 [Setup]
+SourceDir={#RepoRoot}
 AppId={#ProductId}
 AppName=Tera
 AppVersion={#AppVersion}

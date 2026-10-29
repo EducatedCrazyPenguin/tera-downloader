@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 
 
 def record(directory, event):
@@ -43,6 +43,8 @@ def main(argv=None, *, prefer_environment=True):
     directory = override or default_data_dir()
     try:
         if args.self_test:
+            if not getattr(sys, 'frozen', False):
+                sys.path.insert(0,str(ROOT/'tests'))
             if args.data_dir is None:
                 raise ValueError('Self-tests require an explicit disposable data directory.')
             directory.mkdir(parents=True, exist_ok=True)

@@ -2,12 +2,12 @@
 from pathlib import Path
 from PyInstaller.utils.hooks import copy_metadata
 
-root = Path(SPECPATH)
+root = Path(SPECPATH).parent
 data = [(str(root / 'build' / 'licenses'), 'licenses'), (str(root / 'README.md'), 'docs'),
-        (str(root / 'camoufox_worker.cjs'), '.')]
+        (str(root / 'src' / 'camoufox_worker.cjs'), '.')]
 for package in ('pystray', 'Pillow', 'six'):
     data += copy_metadata(package)
-a = Analysis([str(root / 'Start Tera.pyw')], pathex=[str(root)], binaries=[(str(root / '.tools' / 'stream-ffmpeg.exe'), 'tools')], datas=data,
+a = Analysis([str(root / 'Start Tera.pyw')], pathex=[str(root/'src'),str(root/'tests')], binaries=[(str(root / '.tools' / 'stream-ffmpeg.exe'), 'tools')], datas=data,
              hiddenimports=['pystray._win32'], hookspath=[], hooksconfig={}, runtime_hooks=[],
              excludes=['pytest'], noarchive=False)
 pyz = PYZ(a.pure)

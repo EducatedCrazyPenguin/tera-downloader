@@ -1,3 +1,13 @@
+# Repository organisation
+
+Source-only maintenance completed 30 October 2026. Application code is in src/;
+tests and fixtures in tests/; tooling in scripts/; Windows definitions in packaging/;
+dependencies in requirements/; design/manual/development records in docs/.
+Run `python scripts/test.py -v` from the repository root. Root launchers remain.
+See todo.md for named checks. Installed Tera 0.9.0 and saved state were left in place.
+
+Evidence: 3/3 for the recorded layout/unit/runtime/build observations.
+
 # Queue ordering and bulk controls 0.9.0
 
 Implemented and installed 30 October 2026: multi-selection move/remove, Move next,

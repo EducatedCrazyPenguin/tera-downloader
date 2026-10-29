@@ -86,7 +86,7 @@ class StateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with StateStore(folder):
                 result = subprocess.run([sys.executable, '-c', script, folder],
-                    cwd=Path(__file__).parent, capture_output=True, text=True, timeout=5,
+                    cwd=Path(__file__).resolve().parents[1] / "src", capture_output=True, text=True, timeout=5,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.strip(), 'blocked')

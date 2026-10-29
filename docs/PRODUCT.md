@@ -20,7 +20,7 @@ without repeatedly supervising them. Public distribution is outside this redesig
 Paste a share link and use one obvious Download now action to download all videos.
 Reviewing and selecting individual videos is optional. Quick start is implemented
 through the existing validated discovery and queue path; runtime evidence is
-recorded in tasks/todo.md.
+recorded in development/todo.md.
 
 ## Operating Context
 
@@ -62,7 +62,7 @@ generous filename typography and restrained red actions.
 
 ## Evidence on Hand
 
-Current behavior is documented in README.md and tasks/todo.md. A mapped native
+Current behavior is documented in ../README.md and development/todo.md. A mapped native
 probe reproduced hidden download/queue controls at existing window sizes on
 22 October 2026; invoking withdrawn widgets had not caught clipping. The existing
 offline suite has 146 tests and synthetic runtime harnesses. Live-provider resume
@@ -71,4 +71,4 @@ and large transfers remain unverified.
 **Evidence: 3/3 for the recorded design and checked synthetic source/runtime scope —
 user-selected direction, source, mapped desktop captures and offline checks.
 Whole-product evidence remains 2/3: live-provider behavior is unverified; current
-packaged and installed verification is recorded separately in tasks/todo.md.**
+packaged and installed verification is recorded separately in development/todo.md.**

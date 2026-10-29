@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — repository maintenance
+
+- Organise source, tests, tooling, packaging, requirements and documentation into dedicated folders.
+- Keep the root launchers, preserve legacy settings lookup, and add a canonical test runner.
+- Shorten the GitHub landing README; move the full manual into docs/usage.md.
+- No new installed-app release or data migration.
+
+
 ## 0.9.0 — 30 October 2026
 
 - Move/remove multiple eligible queue selections with active-item protection.
@@ -34,7 +42,7 @@ Live automatic resolution of the supplied share succeeded and Tera accepted its
 playback/audio/quality and future Cloudflare acceptance remain unverified.
 
 **Evidence: 3/3 for the named live resolution/playlist observation; 2/3 for
-complete provider delivery. Runtime/install gates are recorded in tasks/todo.md.**
+complete provider delivery. Runtime/install gates are recorded in docs/development/todo.md.**
 
 ## 0.6.0 — 29 October 2026
 
@@ -119,7 +127,7 @@ access and complete real downloads remain unverified.**
 - Retry one brief Windows settings-replacement denial while preserving previous settings on persistent failure.
 
 Verified with 146 offline tests, synthetic native/packaged/installed flows and a
-disposable installer upgrade/uninstall. See tasks/todo.md for the exact scope.
+disposable installer upgrade/uninstall. See docs/development/todo.md for the exact scope.
 
 **Evidence: 2/3 — Checked local and installed behavior; live TeraBox resume and
 large-file reliability remain unverified. Personal installer is unsigned.**

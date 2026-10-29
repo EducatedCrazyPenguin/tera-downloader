@@ -8,6 +8,9 @@ import shutil
 import subprocess
 import sys
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'src'))
+
 from app_version import VERSION
 
 
@@ -29,7 +32,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--iscc', type=Path, default=Path('.tools/InnoSetup/ISCC.exe'))
     args = parser.parse_args()
-    root = Path(__file__).resolve().parent
+    root = ROOT
     os.chdir(root)
     build = root / 'build'
     build.mkdir(exist_ok=True)
@@ -72,13 +75,13 @@ def main():
     shutil.copy2(root / 'third_party' / 'Tcl-8.6.15-license.terms', notices / 'Tcl-license.terms')
     shutil.copy2(Path(sys.base_prefix) / 'tcl' / 'tk8.6' / 'license.terms', notices / 'Tk-license.terms')
     (notices / 'README.txt').write_text('Bundled third-party notices. Dependencies are unmodified.\n'
-        'Source versions: see requirements-desktop.txt in the Tera source repository.\n'
+        'Source versions: see requirements/requirements-desktop.txt in the Tera source repository.\n'
         'https://github.com/EducatedCrazyPenguin/tera-downloader\n'
         'https://pypi.org/project/pystray/0.19.5/ (LGPLv3)\n'
         'https://pypi.org/project/Pillow/13.0.0/ (MIT-CMU)\n'
         'https://pypi.org/project/six/1.17.0/ (MIT)\n', encoding='utf-8')
-    run([sys.executable, '-m', 'PyInstaller', '--noconfirm', 'Tera.spec'], build / 'pyinstaller.log')
-    run([str(args.iscc.resolve()), '/Qp', f'/DAppVersion={VERSION}', 'tera-installer.iss'], build / 'installer-build.log')
+    run([sys.executable, '-m', 'PyInstaller', '--noconfirm', 'packaging/Tera.spec'], build / 'pyinstaller.log')
+    run([str(args.iscc.resolve()), '/Qp', f'/DAppVersion={VERSION}', f'/DRepoRoot={root}', 'packaging/tera-installer.iss'], build / 'installer-build.log')
     installer = root / 'dist' / f'Tera-{VERSION}-Setup.exe'
     digest = hashlib.sha256(installer.read_bytes()).hexdigest()
     installer.with_suffix('.sha256').write_text(f'{digest}  {installer.name}\n', encoding='ascii')

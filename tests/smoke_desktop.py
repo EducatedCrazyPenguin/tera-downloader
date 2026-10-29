@@ -155,7 +155,7 @@ def launcher_check(base):
     pid = None
     with (base / 'process.log').open('w') as log:
         try:
-            command = [sys.executable] if getattr(sys, 'frozen', False) else [str(pythonw), str(Path(__file__).with_name('Start Tera.pyw'))]
+            command = [sys.executable] if getattr(sys, 'frozen', False) else [str(pythonw), str(Path(__file__).resolve().parents[1] / 'Start Tera.pyw')]
             environment.update(TERA_DATA_DIR=str(state), PYTHONPATH='', PYTHONHOME='')
             if getattr(sys, 'frozen', False):
                 environment['PATH'] = os.environ.get('SystemRoot', r'C:\Windows') + r'\System32'
